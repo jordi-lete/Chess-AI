@@ -1,6 +1,31 @@
 import chess
 import chess.pgn
 
+def board_to_array(board):
+    piece_map = board.piece_map()
+    array = [[0 for _ in range(8)] for _ in range(8)]
+    piece_encoding = {
+        None: 0,
+        chess.PAWN: 1,
+        chess.KNIGHT: 2,
+        chess.BISHOP: 3,
+        chess.ROOK: 4,
+        chess.QUEEN: 5,
+        chess.KING: 6
+    }
+
+    # TODO: This convention might be an issue later when integrating with the C++ board
+    # There we use file, rank convention with a1 = [0][7]
+    for square, piece in piece_map.items():
+        row = chess.square_rank(square)
+        col = chess.square_file(square)
+        value = piece_encoding[piece.piece_type]
+        if piece.color == chess.BLACK:
+            value += 6  # Offset for black pieces
+        array[row][col] = value
+
+    return array
+
 def extract_moves_from_pgn(pgn_path, my_color='white'):
     games_data = []
 
@@ -25,26 +50,3 @@ def extract_moves_from_pgn(pgn_path, my_color='white'):
                 node = next_node
 
     return games_data
-
-def board_to_array(board):
-    piece_map = board.piece_map()
-    array = [[0 for _ in range(8)] for _ in range(8)]
-    piece_encoding = {
-        None: 0,
-        chess.PAWN: 1,
-        chess.KNIGHT: 2,
-        chess.BISHOP: 3,
-        chess.ROOK: 4,
-        chess.QUEEN: 5,
-        chess.KING: 6
-    }
-
-    for square, piece in piece_map.items():
-        row = 7 - chess.square_rank(square)
-        col = chess.square_file(square)
-        value = piece_encoding[piece.piece_type]
-        if piece.color == chess.BLACK:
-            value += 6  # Offset for black pieces
-        array[col][row] = value  # your board[file][rank] indexing
-
-    return array
