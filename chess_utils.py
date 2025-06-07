@@ -2,6 +2,9 @@ import chess
 import chess.pgn
 import numpy as np
 import torch
+from model import ChessModel
+
+''' ------------------- DATA PREPROCESSING ------------------- '''
 
 def board_to_tensor(board: chess.Board, my_color: bool) -> np.ndarray:
     """
@@ -110,6 +113,8 @@ def extract_training_data(pgn_path: str, my_color: str = 'white') -> list:
     return training_data
 
 
+''' ------------------- TRAINING ------------------- '''
+
 def move_to_policy_index(move: chess.Move) -> int:
     """
     Convert a chess move to a policy index for neural network output.
@@ -149,6 +154,7 @@ def create_legal_moves_mask(board: chess.Board) -> torch.Tensor:
     
     return mask
 
+''' ------------------- PREDICTING ------------------- '''
 
 def policy_index_to_move(policy_index: int, board: chess.Board) -> chess.Move:
     """Convert policy index back to chess move."""
@@ -175,3 +181,36 @@ def policy_index_to_move(policy_index: int, board: chess.Board) -> chess.Move:
             promotion = chess.ROOK
     
     return chess.Move(from_square, to_square, promotion)
+
+# Load the model
+def load_model(model_path, input_channels=19):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Create model instance
+    model = ChessModel(input_channels=input_channels).to(device)
+    
+    # Load saved weights
+    checkpoint = torch.load(model_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    model.eval()  # Set to evaluation mode
+    return model, device
+
+def test_single_position(model, board, my_color_bool, device):
+    # Convert board to tensor (using your existing function)
+    position_tensor = board_to_tensor(board, my_color_bool)
+    
+    # Add batch dimension and move to device
+    input_tensor = torch.tensor(position_tensor, dtype=torch.float32).unsqueeze(0).to(device)
+    
+    with torch.no_grad():
+        policy_logits = model(input_tensor)
+        
+    # Get top 5 moves
+    top_moves = torch.topk(policy_logits, 5)
+    
+    print("Top 5 predicted moves:")
+    for i, (score, move_idx) in enumerate(zip(top_moves.values[0], top_moves.indices[0])):
+        # You'll need a function to convert policy_index back to move
+        move = policy_index_to_move(move_idx.item(), board)
+        print(f"{i+1}. {move} (score: {score:.3f})")
