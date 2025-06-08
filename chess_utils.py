@@ -6,7 +6,7 @@ from model import ChessModel
 
 ''' ------------------- DATA PREPROCESSING ------------------- '''
 
-def board_to_tensor(board: chess.Board, my_color: bool) -> np.ndarray:
+def board_to_tensor(board: chess.Board) -> np.ndarray:
     """
     Tensor representation for chess positions.
     
@@ -69,8 +69,9 @@ def board_to_tensor(board: chess.Board, my_color: bool) -> np.ndarray:
         tensor[16, ep_row, ep_col] = 1.0
     
     # Turn indicator (channel 17)
-    if board.turn == my_color:
+    if board.turn:
         tensor[17, :, :] = 1.0
+    print(f"Turn channel (index 18): {tensor[17]}")
     
     # Check indicator (channel 18)
     if board.is_check():
@@ -103,7 +104,7 @@ def extract_training_data(pgn_path: str, my_color: str = 'white') -> list:
                 
                 # Only collect positions where it's my turn
                 if board.turn == my_color_bool:
-                    position_tensor = board_to_tensor(board, my_color_bool)
+                    position_tensor = board_to_tensor(board)
                     move_index = move_to_policy_index(move)
                     training_data.append((position_tensor, move_index))
                 
@@ -196,9 +197,11 @@ def load_model(model_path, input_channels=19):
     model.eval()  # Set to evaluation mode
     return model, device
 
-def test_single_position(model, board, my_color_bool, device):
+def test_single_position(model, board, device):
+    best_move = None
+
     # Convert board to tensor (using your existing function)
-    position_tensor = board_to_tensor(board, my_color_bool)
+    position_tensor = board_to_tensor(board)
     
     # Add batch dimension and move to device
     input_tensor = torch.tensor(position_tensor, dtype=torch.float32).unsqueeze(0).to(device)
@@ -207,10 +210,16 @@ def test_single_position(model, board, my_color_bool, device):
         policy_logits = model(input_tensor)
         
     # Get top 5 moves
-    top_moves = torch.topk(policy_logits, 5)
+    # top_moves = torch.topk(policy_logits, 5)
+    probabilities = torch.softmax(policy_logits, dim=1)
+    top_moves = torch.topk(probabilities, 5)
     
     print("Top 5 predicted moves:")
-    for i, (score, move_idx) in enumerate(zip(top_moves.values[0], top_moves.indices[0])):
+    for i, (prob, move_idx) in enumerate(zip(top_moves.values[0], top_moves.indices[0])):
         # You'll need a function to convert policy_index back to move
         move = policy_index_to_move(move_idx.item(), board)
-        print(f"{i+1}. {move} (score: {score:.3f})")
+        print(f"{i+1}. {move} (confidence: {prob:.1%})")
+        if move in board.legal_moves and best_move is None:
+            best_move = move
+    
+    return best_move
