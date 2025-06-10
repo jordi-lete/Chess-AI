@@ -71,7 +71,6 @@ def board_to_tensor(board: chess.Board) -> np.ndarray:
     # Turn indicator (channel 17)
     if board.turn:
         tensor[17, :, :] = 1.0
-    print(f"Turn channel (index 18): {tensor[17]}")
     
     # Check indicator (channel 18)
     if board.is_check():
