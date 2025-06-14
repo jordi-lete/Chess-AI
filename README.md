@@ -30,6 +30,17 @@ I am using Python 3.13.3.
 python -m venv venv
 ```
 
+On Windows:
+```bash
+venv\Scripts\activate.ps1 #Powershell
+venv\Scripts\activate.bat #Bash
+```
+
+On Linux:
+```bash
+source venv/bin/activate
+```
+
 ### 3. Install requirements
 
 ```bash
