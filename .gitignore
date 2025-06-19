@@ -2,3 +2,4 @@
 *.cpython*
 *.pth
 *.pt
+stockfish/
