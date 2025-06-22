@@ -65,3 +65,92 @@ class PositionEvaluator:
             return []
         
 
+''' ------------------ TRAINING DATA ------------------ '''
+
+import chess
+import chess.pgn
+from chess_utils import board_to_tensor, create_legal_moves_mask
+import numpy as np
+import random
+import math
+
+def extract_middlegame_positions(pgn_path: str, num_positions=1000):
+    """
+    Extract middle game positions from PGN files
+    
+    Args:
+        pgn_path: Path to PGN file
+        num_positions: Number of positions to extract
+        min_move: Minimum move number to consider
+        max_move: Maximum move number to consider
+    
+    Returns:
+        List of chess.Board objects representing middle game positions
+    """
+    positions = []
+    
+    with open(pgn_path, 'r', encoding='utf-8') as pgn_file:
+        while len(positions) < num_positions:
+            game = chess.pgn.read_game(pgn_file)
+            if game is None:
+                break
+            
+            board = game.board()
+            node = game
+            move_count = 0
+
+            # generate random number of moves to play
+            num_moves_to_play = math.floor(16 + 20 * random.random()) & ~1
+            
+            # Play through the game
+            while node.variations and len(positions) < num_positions and move_count < num_moves_to_play:
+                next_node = node.variation(0)
+                move = next_node.move
+                board.push(move)
+                move_count += 1
+                node = next_node
+            
+            # Additional filters for middle game characteristics
+            piece_count = len(board.piece_map())
+            if piece_count >= 12 and piece_count <= 28:  # Not too few pieces (endgame) or too many (opening)
+                # Make a copy of the position
+                position_copy = board.copy()
+                positions.append(position_copy)
+
+    print(f"Extracted {len(positions)} middle game positions")
+    return positions
+
+def create_training_batch(positions, batch_size=32):
+    """
+    Create a training batch from positions
+    
+    Returns:
+        - board_tensors: torch.Tensor of shape [batch_size, 19, 8, 8]
+        - legal_moves_masks: torch.Tensor of shape [batch_size, 4288]
+        - boards: List of chess.Board objects for reference
+    """
+    
+    # Sample random positions
+    batch_positions = random.sample(positions, min(batch_size, len(positions)))
+    
+    # Convert to tensors
+    board_tensors = []
+    legal_moves_masks = []
+    boards = []
+    
+    for board in batch_positions:
+        # Convert board to tensor
+        board_tensor = board_to_tensor(board)
+        board_tensors.append(board_tensor)
+        
+        # Create legal moves mask
+        legal_mask = create_legal_moves_mask(board)
+        legal_moves_masks.append(legal_mask)
+        
+        boards.append(board.copy())
+    
+    # Stack into batches
+    board_tensors = torch.tensor(np.stack(board_tensors), dtype=torch.float32)
+    legal_moves_masks = torch.stack(legal_moves_masks)
+    
+    return board_tensors, legal_moves_masks, boards
