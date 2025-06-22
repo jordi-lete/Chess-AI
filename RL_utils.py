@@ -74,7 +74,7 @@ import numpy as np
 import random
 import math
 
-def extract_middlegame_positions(pgn_path: str, num_positions=1000):
+def extract_middlegame_positions(pgn_path: str, evaluator: PositionEvaluator, num_positions=1000):
     """
     Extract middle game positions from PGN files
     
@@ -113,9 +113,9 @@ def extract_middlegame_positions(pgn_path: str, num_positions=1000):
             # Additional filters for middle game characteristics
             piece_count = len(board.piece_map())
             if piece_count >= 12 and piece_count <= 28:  # Not too few pieces (endgame) or too many (opening)
-                # Make a copy of the position
-                position_copy = board.copy()
-                positions.append(position_copy)
+                eval_score = evaluator.evaluate_position(board)
+                if -0.5 <= eval_score <= 0.5:  # Only add posisions that are roughly equal
+                    positions.append(board.copy())
 
     print(f"Extracted {len(positions)} middle game positions")
     return positions
