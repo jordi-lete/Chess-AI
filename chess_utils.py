@@ -146,11 +146,11 @@ def move_to_policy_index(move: chess.Move) -> int:
 
 def create_legal_moves_mask(board: chess.Board) -> torch.Tensor:
     """Create a mask for legal moves in the policy vector."""
-    mask = torch.zeros(4288, dtype=torch.float32)
+    mask = torch.zeros(4288, dtype=torch.float32) # all moves initially 0
     
     for move in board.legal_moves:
         policy_idx = move_to_policy_index(move)
-        mask[policy_idx] = 1.0
+        mask[policy_idx] = 1.0 # if the move is legal than set mask to 1
     
     return mask
 

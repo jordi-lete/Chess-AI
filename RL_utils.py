@@ -154,3 +154,85 @@ def create_training_batch(positions, batch_size=32):
     legal_moves_masks = torch.stack(legal_moves_masks)
     
     return board_tensors, legal_moves_masks, boards
+
+
+''' ------------------ SELF-PLAY GAME LOOP ------------------ '''
+
+from chess_utils import policy_index_to_move
+
+def play_self_play_game(model, device, starting_position, max_moves=100):
+    """
+    Play a single self-play game from a given starting position
+    
+    Returns:
+        - game_history: List of (board_state, move_probs, legal_moves_mask)
+        - game_result: 1 for white win, -1 for black win, 0 for draw
+    """
+    board = starting_position.copy()
+    game_history = []
+    
+    for move_count in range(max_moves):
+        if board.is_game_over():
+            break
+            
+        # Get model prediction
+        board_tensor = board_to_tensor(board).unsqueeze(0).to(device)
+        legal_moves_mask = create_legal_moves_mask(board).to(device)
+        
+        with torch.no_grad():
+            move_probs = model(board_tensor)
+            
+        # Apply legal moves mask and add exploration noise
+        masked_probs = apply_legal_moves_mask(move_probs, legal_moves_mask)
+        
+        # Select move (with some exploration)
+        move = select_move_with_exploration(masked_probs, board)
+        
+        # Store this position and move probabilities for training
+        game_history.append((
+            board.copy(),
+            masked_probs.cpu(),
+            legal_moves_mask.cpu()
+        ))
+        
+        # Make the move
+        board.push(move)
+    
+    # Determine game result
+    game_result = get_game_result(board)
+    
+    return game_history, game_result
+
+def get_game_result(board):
+    """Convert chess game outcome to RL reward"""
+    if board.is_checkmate():
+        return 1 if board.turn == chess.BLACK else -1  # Winner gets +1
+    elif board.is_stalemate() or board.is_insufficient_material() or board.is_repetition():
+        return 0  # Draw
+    else:
+        return 0  # Unfinished game treated as draw
+    
+def apply_legal_moves_mask(move_probs, legal_moves_mask):
+    """Apply legal moves mask and renormalize probabilities"""
+    # Zero out illegal moves (legal move mask is 1 if legal 0 if illegal)
+    masked_probs = move_probs * legal_moves_mask
+    
+    # Renormalize so probabilities sum to 1
+    masked_probs = masked_probs / (masked_probs.sum(dim=1, keepdim=True) + 1e-8)
+    
+    return masked_probs
+
+def select_move_with_exploration(masked_probs, board, temperature=1.0):
+    """Select move with some exploration noise"""
+    if temperature > 0:
+        # Add exploration by sampling from probability distribution
+        probs = masked_probs.squeeze().cpu().numpy()
+        probs = np.power(probs, 1/temperature)
+        probs = probs / np.sum(probs)
+        
+        move_idx = np.random.choice(len(probs), p=probs)
+    else:
+        # Greedy selection (no exploration)
+        move_idx = torch.argmax(masked_probs).item()
+    
+    return policy_index_to_move(move_idx, board)
