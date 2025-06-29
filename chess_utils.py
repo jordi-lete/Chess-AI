@@ -199,7 +199,7 @@ def load_model(model_path, input_channels=19):
 def test_single_position(model, board, device):
     best_move = None
 
-    # Convert board to tensor (using your existing function)
+    # Convert board to tensor
     position_tensor = board_to_tensor(board)
     
     # Add batch dimension and move to device
@@ -215,7 +215,6 @@ def test_single_position(model, board, device):
     
     print("Top 5 predicted moves:")
     for i, (prob, move_idx) in enumerate(zip(top_moves.values[0], top_moves.indices[0])):
-        # You'll need a function to convert policy_index back to move
         move = policy_index_to_move(move_idx.item(), board)
         print(f"{i+1}. {move} (confidence: {prob:.1%})")
         if move in board.legal_moves and best_move is None:
