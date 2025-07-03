@@ -113,9 +113,9 @@ def extract_middlegame_positions(pgn_path: str, evaluator: PositionEvaluator, nu
             # Additional filters for middle game characteristics
             piece_count = len(board.piece_map())
             if piece_count >= 12 and piece_count <= 28:  # Not too few pieces (endgame) or too many (opening)
-                eval_score = evaluator.evaluate_position(board)
-                if -0.5 <= eval_score <= 0.5:  # Only add posisions that are roughly equal
-                    positions.append(board.copy())
+                # eval_score = evaluator.evaluate_position(board)
+                # if -0.5 <= eval_score <= 0.5:  # Only add posisions that are roughly equal
+                positions.append(board.copy())
 
     print(f"Extracted {len(positions)} middle game positions")
     return positions
@@ -156,60 +156,59 @@ def create_training_batch(positions, batch_size=32):
     return board_tensors, legal_moves_masks, boards
 
 
+
 ''' ------------------ SELF-PLAY GAME LOOP ------------------ '''
 
 from chess_utils import policy_index_to_move, move_to_policy_index
 import torch.nn.functional as F
 
-def play_self_play_game(model, device, starting_position, max_moves=100, temperature=1.0):
-    """
-    Play a single self-play game from a given starting position
-    
-    Returns:
-        - game_history: List of (board_state, move_probs, legal_moves_mask)
-        - game_result: 1 for white win, -1 for black win, 0 for draw
-    """
-    board = starting_position.copy()
-    game_history = []
+def self_play_game(model, device, temperature=1.0, max_moves=200):
+    board = chess.Board()
+    trajectory = []
 
-    model.eval()
-    
-    for move_count in range(max_moves):
-        if board.is_game_over():
-            break
-            
+    while not board.is_game_over() and board.fullmove_number <= max_moves:
         # Convert board to tensor
-        position_tensor = board_to_tensor(board)
-        # Add batch dimension and move to device
-        input_tensor = torch.tensor(position_tensor, dtype=torch.float32).unsqueeze(0).to(device)
-        legal_moves_mask = create_legal_moves_mask(board).to(device)
-        
+        board_tensor = board_to_tensor(board)
+        input_tensor = torch.tensor(board_tensor, dtype=torch.float32).unsqueeze(0).to(device)
+
+        # Forward pass
         with torch.no_grad():
-            move_probs = model(input_tensor)
-            
-        # Apply legal moves mask and add exploration noise
-        masked_probs = apply_legal_moves_mask(move_probs, legal_moves_mask)
-        
-        # Select move (with some exploration)
-        move = select_move_with_exploration(masked_probs, board, temperature)
-        move_idx = move_to_policy_index(move)
-        
-        # Store this position and move probabilities for training
-        # Store this position and information for training (as tuple, not dict)
-        game_history.append((
-            input_tensor.cpu(),           # board state
-            legal_moves_mask.cpu(),       # legal moves mask
-            move_idx,                     # actual move index
-            board.turn                    # player (True=white, False=black)
-        ))
-        
-        # Make the move
+            policy_logits, value = model(input_tensor)
+            policy_logits = policy_logits[0].cpu()
+            value = value.item()
+
+        # Mask illegal moves
+        mask = create_legal_moves_mask(board)
+        masked_logits = policy_logits + torch.log(mask + 1e-8)  # log(0) becomes -inf
+
+        # Sample move
+        probs = torch.softmax(masked_logits / temperature, dim=0)
+        move_idx = torch.multinomial(probs, 1).item()
+        move = policy_index_to_move(move_idx, board)
+
+        if not board.is_legal(move):
+            print("Warning: model chose illegal move.")
+            break
+
+        trajectory.append((board_tensor, probs.numpy(), board.turn))  # Save (s, π, player)
         board.push(move)
-    
-    # Determine game result
-    game_result = get_game_result(board)
-    
-    return game_history, game_result
+
+    # Final game result: +1/-1/0 from white's perspective
+    result = board.result()
+    if result == "1-0":
+        outcome = 1.0
+    elif result == "0-1":
+        outcome = -1.0
+    else:
+        outcome = 0.0
+
+    # Create final dataset: [(s_t, π_t, z)] with z adjusted for each player
+    data = []
+    for board_tensor, pi, player_color in trajectory:
+        z = outcome if player_color == chess.WHITE else -outcome
+        data.append((board_tensor, pi, z))
+
+    return data
 
 def get_game_result(board):
     """Convert chess game outcome to RL reward"""
@@ -246,6 +245,17 @@ def select_move_with_exploration(masked_probs, board, temperature=1.0):
     return policy_index_to_move(move_idx, board)
 
 ''' --------------- RL model ----------------'''
+
+def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_mask):
+    # Mask illegal moves
+    masked_logits = policy_logits + (legal_mask - 1) * 1e9
+    policy_loss = F.cross_entropy(masked_logits, move_targets)
+
+    value_loss = F.mse_loss(value_pred.squeeze(), value_targets.float())
+
+    total_loss = policy_loss + value_loss
+    return total_loss, policy_loss, value_loss
+
 
 def update_model(model, optimiser, game_histories, game_results, device):
     """
@@ -302,6 +312,7 @@ def update_model(model, optimiser, game_histories, game_results, device):
         # Gradient clipping to prevent exploding gradients
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         
+        # Update model parameters in-place
         optimiser.step()
         
         return avg_loss.item()
