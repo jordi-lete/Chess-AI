@@ -29,11 +29,22 @@ class ChessModel(nn.Module):
             nn.Dropout(0.3),
             nn.Linear(1024, 4288) # expand to 4288
         )
+
+        self.value_head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, 1),
+            nn.Tanh()  # Output between -1 (loss) and 1 (win)
+        )
     
     def forward(self, x):
         # Conv1 -> Relu -> Conv2 -> Relu -> Conv3 -> Relu -> average pool
         # -> Flatten -> Linear1 -> Relu -> Dropout -> Linear2 -> Output
         x = self.conv_layers(x)
         x = self.global_avg_pool(x)
-        policy_logits = self.policy_head(x)
-        return policy_logits
+        policy = self.policy_head(x)
+        value = self.value_head(x)
+        return policy, value
+    
