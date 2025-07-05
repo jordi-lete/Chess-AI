@@ -206,7 +206,7 @@ def test_single_position(model, board, device):
     input_tensor = torch.tensor(position_tensor, dtype=torch.float32).unsqueeze(0).to(device)
     
     with torch.no_grad():
-        policy_logits = model(input_tensor)
+        policy_logits, _ = model(input_tensor)
         
     # Get top 5 moves
     # top_moves = torch.topk(policy_logits, 5)
