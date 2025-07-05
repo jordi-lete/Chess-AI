@@ -129,8 +129,6 @@ import torch.nn.functional as F
 def play_self_play_game(model, device, starting_position, max_moves=100, temperature=1.0):
     """
     Play one self-play game using model policy sampling
-    Returns:
-        - game_history: list of (input_tensor, target_policy_probs, game_result)
     """
     board = starting_position.copy()
     game_history = []
@@ -147,36 +145,32 @@ def play_self_play_game(model, device, starting_position, max_moves=100, tempera
         legal_moves_mask = create_legal_moves_mask(board).to(device)
 
         with torch.no_grad():
-            policy_logits, _ = model(input_tensor)
+            policy_logits, value_pred = model(input_tensor)
+            
+            # Check for NaN in model output
+            if torch.isnan(policy_logits).any() or torch.isnan(value_pred).any():
+                print("Warning: NaN detected in model output!")
+                break
+                
             masked_probs = apply_legal_moves_mask(policy_logits, legal_moves_mask)
         
         # Sample move
         move = select_move_with_exploration(masked_probs, board, temperature)
         move_idx = move_to_policy_index(move)
 
-        # Store state and probs (π) — masked_probs already softmaxed
+        # Store state and data
         game_history.append((
             input_tensor.cpu(),                   # board state
-            masked_probs.squeeze().cpu(),         # policy distribution π
-            move_idx,
-            board.turn                            # who played: True=white, False=black
+            legal_moves_mask.cpu(),              # legal moves mask
+            move_idx,                            # selected move index
+            board.turn                           # who played: True=white, False=black
         ))
 
         board.push(move)
 
-    # Determine outcome (from final position)
+    # Determine outcome
     final_result = get_game_result(board)
-
-    # Convert to ±1 reward from white’s POV
-    if final_result == 1:
-        z = 1
-    elif final_result == -1:
-        z = -1
-    else:
-        z = 0
-
-    # return labeled_history
-    return game_history, z
+    return game_history, final_result
 
 
 def get_game_result(board):
