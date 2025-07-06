@@ -1,68 +1,41 @@
 import torch
 from model import ChessModel
+from ResNet_model import ResNetChessModel
 
 ''' ------------------ LOAD MODEL ------------------ '''
 
-def load_model(model_path, input_channels=19):
+def load_model(model_path=None, input_channels=19):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # Create model instance
     model = ChessModel(input_channels=input_channels).to(device)
     
     # Load saved weights
-    checkpoint = torch.load(model_path, map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    if model_path:
+        checkpoint = torch.load(model_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        print(f"Model loaded from {model_path}")
+    else:
+        print("Initialized new model.")
     
     model.eval()  # Set to evaluation mode
     return model, device
 
+def load_resnet_model(model_path=None, input_channels=19):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-''' ------------------ STOCKFISH ------------------ '''
+    # Create model instance
+    model = ResNetChessModel(input_channels=input_channels).to(device)
 
-from stockfish import Stockfish
+    if model_path:
+        checkpoint = torch.load(model_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        print(f"Model loaded from {model_path}")
+    else:
+        print("Initialized new model.")
 
-class PositionEvaluator:
-    def __init__(self, stockfish_path, elo_rating=1400):
-        """Initialize Stockfish engine for position evaluation"""
-        self.stockfish = Stockfish(stockfish_path)
-        self.stockfish.set_elo_rating(elo_rating)
-        self.stockfish.update_engine_parameters({"UCI_LimitStrength": True})
-        print(f"Stockfish initialized with ELO: {elo_rating}")
-    
-    def evaluate_position(self, board):
-        """
-        Get position evaluation in normalized form
-        Returns value between -1.0 and 1.0 (from white's perspective)
-        """
-        try:
-            self.stockfish.set_fen_position(board.fen())
-            info = self.stockfish.get_evaluation()
-            
-            if info is None:
-                return 0.0
-            
-            eval_type = info["type"]
-            score = info["value"]
-            
-            if eval_type == "mate":
-                # Mate scores: positive for white advantage, negative for black
-                return 1.0 if score > 0 else -1.0
-            else:
-                # Centipawn scores: normalize to [-1, 1] range
-                normalized_score = max(-10.0, min(10.0, score / 100.0))
-                return normalized_score
-                
-        except Exception as e:
-            print(f"Evaluation error: {e}")
-            return 0.0
-    
-    def get_best_moves(self, board, num_moves=3):
-        """Get top N moves from Stockfish"""
-        try:
-            self.stockfish.set_fen_position(board.fen())
-            return self.stockfish.get_top_moves(num_moves)
-        except:
-            return []
+    model.eval()
+    return model, device
         
 
 ''' ------------------ TRAINING DATA ------------------ '''
@@ -74,7 +47,7 @@ import numpy as np
 import random
 import math
 
-def extract_middlegame_positions(pgn_path: str, evaluator: PositionEvaluator, num_positions=1000):
+def extract_middlegame_positions(pgn_path: str, num_positions=1000):
     """
     Extract middle game positions from PGN files
     
@@ -172,6 +145,37 @@ def play_self_play_game(model, device, starting_position, max_moves=100, tempera
     final_result = get_game_result(board)
     return game_history, final_result
 
+from mcts import SimpleMCTS
+
+def play_game_with_mcts(model, device, starting_board, max_moves=100, temperature=1.0, num_simulations=100):
+    """Play a game using MCTS"""
+    board = starting_board.copy()
+    model.eval()
+    mcts = SimpleMCTS(model, device, num_simulations)
+    game_history = []
+    
+    while not board.is_game_over() and len(game_history) < max_moves:
+        # Get MCTS action probabilities
+        action_probs, root = mcts.get_action_probs(board, temperature)
+        
+        # Store training data
+        board_tensor = board_to_tensor(board)
+        
+        # Convert action probs to policy vector
+        policy_vector = np.zeros(4288)
+        for move, prob in action_probs.items():
+            move_idx = move_to_policy_index(move)
+            policy_vector[move_idx] = prob
+        
+        game_history.append((board_tensor, policy_vector, board.turn))
+        
+        # Select and make move
+        move = mcts.select_move(board, temperature)
+        board.push(move)
+    
+    # Get final result
+    result = get_game_result(board)
+    return game_history, result
 
 def get_game_result(board):
     """Convert chess game outcome to RL reward"""
@@ -215,6 +219,17 @@ def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_m
     policy_loss = F.cross_entropy(masked_logits, move_targets)
 
     value_loss = F.mse_loss(value_pred.squeeze(), value_targets.float())
+
+    total_loss = policy_loss + value_loss
+    return total_loss, policy_loss, value_loss
+
+def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets):
+    # Policy loss: cross-entropy between predicted logits and soft targets
+    policy_log_probs = F.log_softmax(policy_logits, dim=1)
+    policy_loss = -torch.sum(policy_targets * policy_log_probs, dim=1).mean()
+
+    # Value loss: MSE
+    value_loss = F.mse_loss(value_preds.view(-1), value_targets)
 
     total_loss = policy_loss + value_loss
     return total_loss, policy_loss, value_loss
