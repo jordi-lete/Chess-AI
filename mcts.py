@@ -1,8 +1,8 @@
 import math
 import torch
 import numpy as np
+import chess
 from chess_utils import board_to_tensor, move_to_policy_index
-from RL_utils import get_game_result
 import random
 import torch.nn.functional as F
 
@@ -65,6 +65,7 @@ class MCTSNode:
         if self.parent:
             self.parent.backup(-value)  # Flip value for opponent
 
+
 class SimpleMCTS:
     def __init__(self, model, device, num_simulations=100, c_puct=1.0):
         self.model = model
@@ -85,7 +86,7 @@ class SimpleMCTS:
             # Expansion and evaluation
             if node.board.is_game_over():
                 # Terminal node
-                result = get_game_result(node.board)
+                result = self.get_game_result(node.board)
                 value = result if node.board.turn else -result
             else:
                 # Expand node and get value prediction
@@ -142,3 +143,12 @@ class SimpleMCTS:
             return max(action_probs, key=action_probs.get)
         else:
             return np.random.choice(moves, p=probs)
+        
+    def get_game_result(self, board):
+        """Convert chess game outcome to RL reward"""
+        if board.is_checkmate():
+            return 1 if board.turn == chess.BLACK else -1  # Winner gets +1
+        elif board.is_stalemate() or board.is_insufficient_material() or board.is_repetition() or board.can_claim_draw():
+            return 0  # Draw
+        else:
+            return 0  # Unfinished game treated as draw

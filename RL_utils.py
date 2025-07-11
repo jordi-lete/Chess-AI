@@ -160,6 +160,7 @@ def play_game_with_mcts(model, device, starting_board, max_moves=100, temperatur
         
         # Store training data
         board_tensor = board_to_tensor(board)
+        board_tensor = torch.tensor(board_tensor, dtype=torch.float32).unsqueeze(0).to(device)
         
         # Convert action probs to policy vector
         policy_vector = np.zeros(4288)
@@ -172,9 +173,10 @@ def play_game_with_mcts(model, device, starting_board, max_moves=100, temperatur
         # Select and make move
         move = mcts.select_move(board, temperature)
         board.push(move)
-    
+
     # Get final result
     result = get_game_result(board)
+    print(f"Game finished: {result}")
     return game_history, result
 
 def get_game_result(board):
