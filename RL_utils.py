@@ -155,6 +155,7 @@ def play_game_with_mcts(model, device, starting_board, max_moves=100, temperatur
     game_history = []
     
     while not board.is_game_over() and len(game_history) < max_moves:
+        temperature = 1.0 if len(game_history) < 10 else 0
         # Get MCTS action probabilities
         action_probs, root = mcts.get_action_probs(board, temperature)
         
@@ -225,7 +226,8 @@ def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_m
     total_loss = policy_loss + value_loss
     return total_loss, policy_loss, value_loss
 
-def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets):
+def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets, kl_div):
+    kl_beta = 0.1
     # Policy loss: cross-entropy between predicted logits and soft targets
     policy_log_probs = F.log_softmax(policy_logits, dim=1)
     policy_loss = -torch.sum(policy_targets * policy_log_probs, dim=1).mean()
@@ -233,5 +235,5 @@ def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets)
     # Value loss: MSE
     value_loss = F.mse_loss(value_preds.view(-1), value_targets)
 
-    total_loss = policy_loss + value_loss
+    total_loss = policy_loss + value_loss + kl_beta*kl_div
     return total_loss, policy_loss, value_loss

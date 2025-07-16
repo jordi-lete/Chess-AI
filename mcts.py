@@ -67,7 +67,7 @@ class MCTSNode:
 
 
 class SimpleMCTS:
-    def __init__(self, model, device, num_simulations=100, c_puct=1.0):
+    def __init__(self, model, device, num_simulations=200, c_puct=1.0):
         self.model = model
         self.device = device
         self.num_simulations = num_simulations
