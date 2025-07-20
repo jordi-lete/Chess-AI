@@ -34,7 +34,7 @@ def load_resnet_model(model_path=None, input_channels=19):
     else:
         print("Initialized new model.")
 
-    model.eval()
+    model.train()
     return model, device
         
 
@@ -147,7 +147,7 @@ def play_self_play_game(model, device, starting_position, max_moves=100, tempera
 
 from mcts import SimpleMCTS
 
-def play_game_with_mcts(model, device, starting_board, max_moves=100, temperature=1.0, num_simulations=100):
+def play_game_with_mcts(model, device, starting_board, max_moves=100, temperature=1.0, num_simulations=400):
     """Play a game using MCTS"""
     board = starting_board.copy()
     model.eval()
@@ -155,7 +155,8 @@ def play_game_with_mcts(model, device, starting_board, max_moves=100, temperatur
     game_history = []
     
     while not board.is_game_over() and len(game_history) < max_moves:
-        temperature = 1.0 if len(game_history) < 10 else 0
+        temperature = max(0.1, 1.0 * (0.95 ** len(game_history)))
+        # temperature = 1.0 if len(game_history) < 10 else 0.1
         # Get MCTS action probabilities
         action_probs, root = mcts.get_action_probs(board, temperature)
         
@@ -226,8 +227,8 @@ def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_m
     total_loss = policy_loss + value_loss
     return total_loss, policy_loss, value_loss
 
-def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets, kl_div):
-    kl_beta = 0.1
+def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets, kl_div, epoch):
+    kl_beta = max(0.05, 0.5 * (0.95 ** epoch))
     # Policy loss: cross-entropy between predicted logits and soft targets
     policy_log_probs = F.log_softmax(policy_logits, dim=1)
     policy_loss = -torch.sum(policy_targets * policy_log_probs, dim=1).mean()
