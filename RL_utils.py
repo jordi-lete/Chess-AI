@@ -94,6 +94,66 @@ def extract_middlegame_positions(pgn_path: str, num_positions=1000):
     return positions
 
 
+def extract_varied_positions(pgn_path: str, num_positions=1000, opening_frac=0.2, early_frac=0.3):
+    """
+    Extract a mix of opening, early-game, and middlegame positions from PGN files.
+
+    Args:
+        pgn_path: Path to PGN file
+        num_positions: Total number of positions to extract
+        opening_frac: Fraction of positions from opening (move 0-4)
+        early_frac: Fraction from early-game (move 5-12)
+        The rest will be middlegame (move 13+ with piece count filter)
+
+    Returns:
+        List of chess.Board objects
+    """
+    positions = []
+    opening_positions = int(num_positions * opening_frac)
+    early_positions = int(num_positions * early_frac)
+    middlegame_positions = num_positions - opening_positions - early_positions
+
+    with open(pgn_path, 'r', encoding='utf-8') as pgn_file:
+        while len(positions) < num_positions:
+            game = chess.pgn.read_game(pgn_file)
+            if game is None:
+                break
+
+            board = game.board()
+            node = game
+            move_count = 0
+
+            # Decide which type to extract
+            if len(positions) < opening_positions:
+                # Opening: random move between 0 and 4
+                num_moves_to_play = random.randint(0, 4)
+            elif len(positions) < opening_positions + early_positions:
+                # Early-game: random move between 5 and 12
+                num_moves_to_play = random.randint(5, 12)
+            else:
+                # Middlegame: random move between 13 and 20
+                num_moves_to_play = random.randint(13, 20)
+
+            # Play through the game
+            while node.variations and move_count < num_moves_to_play:
+                next_node = node.variation(0)
+                move = next_node.move
+                board.push(move)
+                move_count += 1
+                node = next_node
+
+            # For middlegame, filter by piece count
+            if len(positions) >= opening_positions + early_positions:
+                piece_count = len(board.piece_map())
+                if piece_count < 12 or piece_count > 28:
+                    continue  # Skip if not a typical middlegame
+
+            positions.append(board.copy())
+
+    print(f"Extracted {len(positions)} varied positions (openings, early, middlegame)")
+    return positions
+
+
 ''' ------------------ SELF-PLAY GAME LOOP ------------------ '''
 
 from chess_utils import policy_index_to_move, move_to_policy_index
@@ -238,3 +298,8 @@ def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets,
 
     total_loss = policy_loss + value_loss + kl_beta*kl_div
     return total_loss, policy_loss, value_loss
+
+def blend_policies(mcts_policy, cnn_policy, alpha=0.7):
+    blended = alpha * cnn_policy + (1 - alpha) * mcts_policy
+    blended /= blended.sum()  # Normalize
+    return blended
