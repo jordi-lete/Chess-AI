@@ -48,18 +48,24 @@ class MCTSNode:
             policy_probs = torch.softmax(policy_logits, dim=1).cpu().numpy()[0]
 
         # Mask illegal moves
-        legal_indices = [move_to_policy_index(move) for move in self.board.legal_moves]
+        legal_moves = list(self.board.legal_moves)
+        legal_indices = [move_to_policy_index(move) for move in legal_moves]
         mask = np.zeros_like(policy_probs)
         mask[legal_indices] = 1
         policy_probs *= mask
-        policy_probs /= np.sum(policy_probs) if np.sum(policy_probs) > 0 else 1
+        if policy_probs.sum() > 0:
+            policy_probs /= policy_probs.sum()
+        else:
+            policy_probs = mask / mask.sum()
 
         # Add Dirichlet noise at root
-        if add_noise:
-            noise = np.random.dirichlet([DIRICHLET_ALPHA] * len(policy_probs))
-            policy_probs = (1 - DIRICHLET_EPSILON) * policy_probs + DIRICHLET_EPSILON * noise
+        if add_noise and len(legal_moves) > 0:
+            noise = np.random.dirichlet([DIRICHLET_ALPHA] * len(legal_moves))
+            for i, move in enumerate(legal_moves):
+                idx = move_to_policy_index(move)
+                policy_probs[idx] = (1 - DIRICHLET_EPSILON) * policy_probs[idx] + DIRICHLET_EPSILON * noise[i]
 
-        for move in self.board.legal_moves:
+        for move in legal_moves:
             move_idx = move_to_policy_index(move)
             prior = policy_probs[move_idx]
             child_board = self.board.copy()
