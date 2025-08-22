@@ -147,6 +147,8 @@ def extract_varied_positions(pgn_path: str, num_positions=1000, opening_frac=0.2
                 piece_count = len(board.piece_map())
                 if piece_count < 12 or piece_count > 28:
                     continue  # Skip if not a typical middlegame
+            if board.is_game_over():
+                continue # Skip if already checkmate
 
             positions.append(board.copy())
 
@@ -233,7 +235,9 @@ def play_game_with_mcts(model, device, starting_board, max_moves=100, temperatur
         game_history.append((board_tensor, policy_vector, board.turn))
         
         # Select and make move
-        move = mcts.select_move(board, temperature)
+        moves = list(action_probs.keys())
+        probs = list(action_probs.values())
+        move = np.random.choice(moves, p=probs)
         board.push(move)
 
     # Get final result
