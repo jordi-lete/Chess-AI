@@ -207,53 +207,84 @@ def play_self_play_game(model, device, starting_position, max_moves=100, tempera
     final_result = get_game_result(board)
     return game_history, final_result
 
-from mcts import SimpleMCTS
+# from mcts import SimpleMCTS
 
-def play_game_with_mcts(model, device, starting_board, max_moves=100, temperature=1.0, num_simulations=400):
-    """Play a game using MCTS"""
-    board = starting_board.copy()
-    model.eval()
-    mcts = SimpleMCTS(model, device, num_simulations)
-    game_history = []
+# def play_game_with_mcts(model, device, starting_board, max_moves=100, temperature=1.0, num_simulations=400):
+#     """Play a game using MCTS"""
+#     board = starting_board.copy()
+#     model.eval()
+#     mcts = SimpleMCTS(model, device, num_simulations)
+#     game_history = []
     
-    while not board.is_game_over() and len(game_history) < max_moves:
-        temperature = max(0.1, 1.0 * (0.95 ** len(game_history)))
-        # temperature = 1.0 if len(game_history) < 10 else 0.1
-        # Get MCTS action probabilities
-        action_probs, root = mcts.get_action_probs(board, temperature)
+#     while not board.is_game_over() and len(game_history) < max_moves:
+#         temperature = max(0.1, 1.0 * (0.95 ** len(game_history)))
+#         # temperature = 1.0 if len(game_history) < 10 else 0.1
+#         # Get MCTS action probabilities
+#         action_probs, root = mcts.get_action_probs(board, temperature)
         
-        # Store training data
-        board_tensor = board_to_tensor(board)
-        board_tensor = torch.tensor(board_tensor, dtype=torch.float32).unsqueeze(0).to(device)
+#         # Store training data
+#         board_tensor = board_to_tensor(board)
+#         board_tensor = torch.tensor(board_tensor, dtype=torch.float32).unsqueeze(0).to(device)
         
-        # Convert action probs to policy vector
-        policy_vector = np.zeros(4288)
-        for move, prob in action_probs.items():
-            move_idx = move_to_policy_index(move)
-            policy_vector[move_idx] = prob
+#         # Convert action probs to policy vector
+#         policy_vector = np.zeros(4288)
+#         for move, prob in action_probs.items():
+#             move_idx = move_to_policy_index(move)
+#             policy_vector[move_idx] = prob
         
-        game_history.append((board_tensor, policy_vector, board.turn))
+#         game_history.append((board_tensor, policy_vector, board.turn))
         
-        # Select and make move
-        moves = list(action_probs.keys())
-        probs = list(action_probs.values())
-        move = np.random.choice(moves, p=probs)
-        board.push(move)
+#         # Select and make move
+#         moves = list(action_probs.keys())
+#         probs = list(action_probs.values())
+#         move = np.random.choice(moves, p=probs)
+#         board.push(move)
 
-    # Get final result
-    result = get_game_result(board)
-    print(f"Game finished: {result}")
-    return game_history, result
+#     # Get final result
+#     result = get_game_result(board)
+#     print(f"Game finished: {result}")
+#     return game_history, result
 
-def get_game_result(board):
+_PIECE_VALUES = {
+    chess.PAWN: 1.0,
+    chess.KNIGHT: 3.0,
+    chess.BISHOP: 3.0,
+    chess.ROOK: 5.0,
+    chess.QUEEN: 9.0,
+    chess.KING: 0.0  # king not counted in material sum
+}
+
+def material_score_normalized(board):
+    """
+    Returns (white_material - black_material) normalized to [-1,1].
+    """
+    pm = board.piece_map()
+    white = 0.0
+    black = 0.0
+    for sq, piece in pm.items():
+        val = _PIECE_VALUES.get(piece.piece_type, 0.0)
+        if piece.color == chess.WHITE:
+            white += val
+        else:
+            black += val
+    diff = white - black
+    return float(np.clip(diff / 39, -1.0, 1.0))
+
+def get_game_result(board, resign_value_pred: float = None):
     """Convert chess game outcome to RL reward"""
+    if resign_value_pred is not None:
+        total_plies = (board.fullmove_number - 1) * 2 + (0 if board.turn == chess.WHITE else 1)
+        if total_plies >= 20:
+            if resign_value_pred <= -0.99:
+                # current player resigns -> opponent wins
+                return -1.0 if board.turn == chess.WHITE else 1.0
     if board.is_checkmate():
         return 1 if board.turn == chess.BLACK else -1  # Winner gets +1
     elif board.is_stalemate() or board.is_insufficient_material() or board.is_repetition() or board.can_claim_draw():
         return 0  # Draw
     else:
-        return 0  # Unfinished game treated as draw
-    
+        return material_score_normalized(board)
+
 def apply_legal_moves_mask(move_logits, legal_moves_mask):
     """Apply legal moves mask and renormalize probabilities"""
     # Zero out illegal moves (legal move mask is 1 if legal 0 if illegal)
@@ -302,8 +333,3 @@ def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets,
 
     total_loss = policy_loss + value_loss + kl_beta*kl_div
     return total_loss, policy_loss, value_loss
-
-def blend_policies(mcts_policy, cnn_policy, alpha=0.7):
-    blended = alpha * cnn_policy + (1 - alpha) * mcts_policy
-    blended /= blended.sum()  # Normalize
-    return blended
