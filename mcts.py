@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import chess
 from chess_utils import board_to_tensor, move_to_policy_index
+from RL_utils import get_game_result
 import random
 import torch.nn.functional as F
 
@@ -47,6 +48,11 @@ class MCTSNode:
             policy_logits, value = model(input_tensor)
             policy_probs = torch.softmax(policy_logits, dim=1).cpu().numpy()[0]
 
+        # value is network output in WHITE's POV (tanh -> [-1,1])
+        v = float(value.item())
+        # convert to the *current node* player's perspective (+ = good for player to move)
+        value_for_current_player = v if self.board.turn == chess.WHITE else -v
+
         # Mask illegal moves
         legal_moves = list(self.board.legal_moves)
         legal_indices = [move_to_policy_index(move) for move in legal_moves]
@@ -65,6 +71,12 @@ class MCTSNode:
                 idx = move_to_policy_index(move)
                 policy_probs[idx] = (1 - DIRICHLET_EPSILON) * policy_probs[idx] + DIRICHLET_EPSILON * noise[i]
 
+        legal_mass = policy_probs[legal_indices].sum() if len(legal_indices) > 0 else 0.0
+        if legal_mass > 0:
+            policy_probs /= legal_mass
+        else:
+            policy_probs = mask / mask.sum()
+
         for move in legal_moves:
             move_idx = move_to_policy_index(move)
             prior = policy_probs[move_idx]
@@ -73,7 +85,7 @@ class MCTSNode:
             self.children[move] = MCTSNode(child_board, parent=self, move=move, prior=prior)
 
         self.expanded = True
-        return value.item()
+        return value_for_current_player
     
     def backup(self, value):
         self.visits += 1
@@ -97,8 +109,8 @@ class SimpleMCTS:
             while node.expanded and not node.board.is_game_over():
                 node = node.select_child(self.c_puct)
             if node.board.is_game_over():
-                result = self.get_game_result(node.board)
-                value = result if node.board.turn else -result
+                result = get_game_result(node.board)
+                value = result if node.board.turn == chess.WHITE else -result
             else:
                 value = node.expand(self.model, self.device, add_noise=(node.parent is None))
                 if value is None:
@@ -142,11 +154,3 @@ class SimpleMCTS:
         else:
             return np.random.choice(moves, p=probs)
         
-    def get_game_result(self, board):
-        """Convert chess game outcome to RL reward"""
-        if board.is_checkmate():
-            return 1 if board.turn == chess.BLACK else -1  # Winner gets +1
-        elif board.is_stalemate() or board.is_insufficient_material() or board.is_repetition() or board.can_claim_draw():
-            return 0  # Draw
-        else:
-            return 0  # Unfinished game treated as draw
