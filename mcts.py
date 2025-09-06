@@ -66,7 +66,8 @@ class MCTSNode:
 
         # Add Dirichlet noise at root
         if add_noise and len(legal_moves) > 0:
-            noise = np.random.dirichlet([DIRICHLET_ALPHA] * len(legal_moves))
+            alpha = DIRICHLET_ALPHA / len(legal_moves)
+            noise = np.random.dirichlet([alpha] * len(legal_moves))
             for i, move in enumerate(legal_moves):
                 idx = move_to_policy_index(move)
                 policy_probs[idx] = (1 - DIRICHLET_EPSILON) * policy_probs[idx] + DIRICHLET_EPSILON * noise[i]
