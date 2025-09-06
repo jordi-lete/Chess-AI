@@ -201,23 +201,28 @@ def test_single_position(model, board, device):
 
     # Convert board to tensor
     position_tensor = board_to_tensor(board)
-    
-    # Add batch dimension and move to device
     input_tensor = torch.tensor(position_tensor, dtype=torch.float32).unsqueeze(0).to(device)
-    
+
     with torch.no_grad():
-        policy_logits, _ = model(input_tensor)
-        
-    # Get top 5 moves
-    # top_moves = torch.topk(policy_logits, 5)
-    probabilities = torch.softmax(policy_logits, dim=1)
+        policy_logits, value = model(input_tensor)
+
+    # Build legal move mask
+    legal_mask = torch.full_like(policy_logits, -1e9)  # -inf for illegal
+    for move in board.legal_moves:
+        idx = move_to_policy_index(move)
+        legal_mask[0, idx] = 0  # unmask legal moves
+
+    masked_logits = policy_logits + legal_mask
+    probabilities = torch.softmax(masked_logits, dim=1)
+
+    # Get top 5 moves among legal ones
     top_moves = torch.topk(probabilities, 5)
-    
-    print("Top 5 predicted moves:")
+
+    print("Top 5 predicted legal moves:")
     for i, (prob, move_idx) in enumerate(zip(top_moves.values[0], top_moves.indices[0])):
         move = policy_index_to_move(move_idx.item(), board)
         print(f"{i+1}. {move} (confidence: {prob:.1%})")
-        if move in board.legal_moves and best_move is None:
+        if best_move is None:
             best_move = move
-    
+
     return best_move
