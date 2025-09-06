@@ -268,14 +268,14 @@ def material_score_normalized(board):
         else:
             black += val
     diff = white - black
-    return float(np.clip(diff / 39, -1.0, 1.0))
+    return float(np.clip(diff / 39, -1.0, 1.0) * 0.5)
 
 def get_game_result(board, resign_value_pred: float = None):
     """Convert chess game outcome to RL reward"""
     if resign_value_pred is not None:
         total_plies = (board.fullmove_number - 1) * 2 + (0 if board.turn == chess.WHITE else 1)
         if total_plies >= 20:
-            if resign_value_pred <= -0.99:
+            if resign_value_pred <= -0.8:
                 # current player resigns -> opponent wins
                 return -1.0 if board.turn == chess.WHITE else 1.0
     if board.is_checkmate():
@@ -323,7 +323,7 @@ def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_m
     return total_loss, policy_loss, value_loss
 
 def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets, kl_div, epoch):
-    kl_beta = max(0.05, 0.5 * (0.95 ** epoch))
+    kl_beta = max(0.05, 2.0 * (0.95 ** epoch))
     # Policy loss: cross-entropy between predicted logits and soft targets
     policy_log_probs = F.log_softmax(policy_logits, dim=1)
     policy_loss = -torch.sum(policy_targets * policy_log_probs, dim=1).mean()
@@ -332,4 +332,4 @@ def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets,
     value_loss = F.mse_loss(value_preds.view(-1), value_targets)
 
     total_loss = policy_loss + value_loss + kl_beta*kl_div
-    return total_loss, policy_loss, value_loss
+    return total_loss, policy_loss, value_loss, kl_beta, kl_div
