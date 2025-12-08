@@ -155,6 +155,75 @@ def extract_varied_positions(pgn_path: str, num_positions=1000, opening_frac=0.2
     print(f"Extracted {len(positions)} varied positions (openings, early, middlegame)")
     return positions
 
+def extract_checkmate_positions(num_positions=100, types=("KQvK", "KRvK", "KRRvK", "KQRvK", "KQQvK")):
+    """
+    Generate `num_positions` endgame start boards with forced mate opportunities.
+    Includes both White and Black as the attacking side.
+    """
+    positions = []
+    for _ in range(num_positions):
+        t = random.choice(types)
+        board = chess.Board(None)
+        board.clear()
+
+        # Place kings with distance >1
+        while True:
+            wking = random.choice(chess.SQUARES)
+            bking = random.choice(chess.SQUARES)
+            if abs(chess.square_file(wking) - chess.square_file(bking)) > 1 or \
+               abs(chess.square_rank(wking) - chess.square_rank(bking)) > 1:
+                break
+        board.set_piece_at(wking, chess.Piece(chess.KING, chess.WHITE))
+        board.set_piece_at(bking, chess.Piece(chess.KING, chess.BLACK))
+
+        # Choose attacker color randomly (so we get both sides)
+        attacker = chess.WHITE if random.random() < 0.5 else chess.BLACK
+
+        # Add extra attacking pieces
+        extras = []
+        if t == "KQvK":
+            extras = [(chess.QUEEN, attacker)]
+        elif t == "KRvK":
+            extras = [(chess.ROOK, attacker)]
+        elif t == "KRRvK":
+            extras = [(chess.ROOK, attacker), (chess.ROOK, attacker)]
+        elif t == "KQRvK":
+            extras = [(chess.QUEEN, attacker), (chess.ROOK, attacker)]
+        elif t == "KQQvK":
+            extras = [(chess.QUEEN, attacker), (chess.QUEEN, attacker)]
+
+        for pt, color in extras:
+            while True:
+                sq = random.choice(chess.SQUARES)
+                if board.piece_at(sq) is None:
+                    board.set_piece_at(sq, chess.Piece(pt, color))
+                    # validate that it's not already terminal
+                    if board.is_checkmate() or board.is_check() or board.is_stalemate():
+                        board.remove_piece_at(sq)
+                        continue
+                    break
+
+        # Randomize who moves first (attacker usually to move)
+        board.turn = attacker
+        board.clear_stack()
+        positions.append(board)
+
+    return positions
+
+from games.mate_in_1_fen import MATE_IN_1_FENS
+
+def load_mate_in_one_positions():
+    """Return list of python-chess Board objects from mate-in-1 FENs"""
+    boards = []
+    for fen in MATE_IN_1_FENS:
+        try:
+            board = chess.Board(fen)
+            if not board.is_game_over():  # sanity check
+                boards.append(board)
+        except Exception as e:
+            print(f"Invalid FEN skipped: {fen}, error={e}")
+    print(f"Loaded {len(boards)} mate-in-1 positions.")
+    return boards
 
 ''' ------------------ SELF-PLAY GAME LOOP ------------------ '''
 

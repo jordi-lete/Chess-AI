@@ -1,13 +1,12 @@
-''' ------------------ STOCKFISH ------------------ '''
-
 from stockfish import Stockfish
 
 class PositionEvaluator:
-    def __init__(self, stockfish_path, elo_rating=1400):
+    def __init__(self, stockfish_path, elo_rating=1800):
         """Initialize Stockfish engine for position evaluation"""
         self.stockfish = Stockfish(stockfish_path)
         self.stockfish.set_elo_rating(elo_rating)
-        self.stockfish.update_engine_parameters({"UCI_LimitStrength": True})
+        self.stockfish.update_engine_parameters({"UCI_LimitStrength": True, "Threads": 1, "Hash": 16})
+        self.stockfish.set_depth(10) 
         print(f"Stockfish initialized with ELO: {elo_rating}")
     
     def evaluate_position(self, board):
@@ -43,4 +42,8 @@ class PositionEvaluator:
             self.stockfish.set_fen_position(board.fen())
             return self.stockfish.get_top_moves(num_moves)
         except:
+            print(f"[WARN] Stockfish crashed, restarting... ({e})")
+            self.stockfish = Stockfish(self.stockfish_path)
+            self.stockfish.set_elo_rating(self.elo_rating)
+            self.stockfish.update_engine_parameters({"UCI_LimitStrength": True})
             return []

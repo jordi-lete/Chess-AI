@@ -4,7 +4,6 @@ import numpy as np
 import chess
 from chess_utils import board_to_tensor, move_to_policy_index
 from RL_utils import get_game_result
-import random
 import torch.nn.functional as F
 
 DIRICHLET_ALPHA = 0.3
@@ -141,17 +140,3 @@ class SimpleMCTS:
                 action_probs = {move: prob for move, prob in zip(moves, probs)}
         return action_probs, root
     
-    def select_move(self, board, temperature=1.0):
-        action_probs, root = self.get_action_probs(board, temperature)
-        
-        if not action_probs:
-            return random.choice(list(board.legal_moves))
-        
-        moves = list(action_probs.keys())
-        probs = list(action_probs.values())
-        
-        if temperature == 0:
-            return max(action_probs, key=action_probs.get)
-        else:
-            return np.random.choice(moves, p=probs)
-        
