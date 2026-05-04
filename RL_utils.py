@@ -338,20 +338,27 @@ def material_score_normalized(board):
     diff = white - black
     return float(np.clip(diff / 39, -1.0, 1.0) * 0.5)
 
-def get_game_result(board, resign_value_pred: float = None):
-    """Convert chess game outcome to RL reward"""
-    if resign_value_pred is not None:
-        total_plies = (board.fullmove_number - 1) * 2 + (0 if board.turn == chess.WHITE else 1)
-        if total_plies >= 20:
-            if resign_value_pred <= -0.8:
-                # current player resigns -> opponent wins
-                return -1.0 if board.turn == chess.WHITE else 1.0
+def get_game_result(board, model=None, device=None):
+    """
+    Convert chess game outcome to RL reward (WHITE's POV).
+    For truncated games, bootstraps from the value head if model is provided,
+    otherwise falls back to 0.0 (draw).
+    """
     if board.is_checkmate():
-        return 1 if board.turn == chess.BLACK else -1  # Winner gets +1
-    elif board.is_stalemate() or board.is_insufficient_material() or board.is_repetition() or board.can_claim_draw():
-        return 0  # Draw
+        return 1.0 if board.turn == chess.BLACK else -1.0
+    elif (board.is_stalemate() or board.is_insufficient_material()
+          or board.is_repetition() or board.can_claim_draw()):
+        return 0.0
     else:
-        return material_score_normalized(board)
+        # Truncated game: bootstrap value estimate from the model
+        if model is not None and device is not None:
+            with torch.no_grad():
+                tensor = torch.tensor(
+                    board_to_tensor(board), dtype=torch.float32
+                ).unsqueeze(0).to(device)
+                _, value = model(tensor)
+                return float(value.item())  # model outputs in WHITE's POV
+        return 0.0  # safe fallback if no model available
 
 def apply_legal_moves_mask(move_logits, legal_moves_mask):
     """Apply legal moves mask and renormalize probabilities"""
@@ -390,14 +397,10 @@ def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_m
     total_loss = policy_loss + value_loss
     return total_loss, policy_loss, value_loss
 
-def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets, kl_div, epoch):
-    kl_beta = max(0.05, 2.0 * (0.95 ** epoch))
-    # Policy loss: cross-entropy between predicted logits and soft targets
+def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets, kl_div, global_step):
+    kl_beta = max(0.05, 2.0 * (0.95 ** global_step))  # now decays over iterations, not epochs
     policy_log_probs = F.log_softmax(policy_logits, dim=1)
     policy_loss = -torch.sum(policy_targets * policy_log_probs, dim=1).mean()
-
-    # Value loss: MSE
     value_loss = F.mse_loss(value_preds.view(-1), value_targets)
-
-    total_loss = policy_loss + value_loss + kl_beta*kl_div
+    total_loss = policy_loss + value_loss + kl_beta * kl_div
     return total_loss, policy_loss, value_loss, kl_beta, kl_div
