@@ -276,43 +276,42 @@ def play_self_play_game(model, device, starting_position, max_moves=100, tempera
     final_result = get_game_result(board)
     return game_history, final_result
 
-# from mcts import SimpleMCTS
-
-# def play_game_with_mcts(model, device, starting_board, max_moves=100, temperature=1.0, num_simulations=400):
-#     """Play a game using MCTS"""
-#     board = starting_board.copy()
-#     model.eval()
-#     mcts = SimpleMCTS(model, device, num_simulations)
-#     game_history = []
+def play_game_with_mcts(model, device, starting_board, max_moves=100, temperature=1.0, num_simulations=400):
+    from mcts import SimpleMCTS
+    """Play a game using MCTS"""
+    board = starting_board.copy()
+    model.eval()
+    mcts = SimpleMCTS(model, device, num_simulations)
+    game_history = []
     
-#     while not board.is_game_over() and len(game_history) < max_moves:
-#         temperature = max(0.1, 1.0 * (0.95 ** len(game_history)))
-#         # temperature = 1.0 if len(game_history) < 10 else 0.1
-#         # Get MCTS action probabilities
-#         action_probs, root = mcts.get_action_probs(board, temperature)
+    while not board.is_game_over() and len(game_history) < max_moves:
+        temperature = max(0.1, 1.0 * (0.95 ** len(game_history)))
+        # temperature = 1.0 if len(game_history) < 10 else 0.1
+        # Get MCTS action probabilities
+        action_probs, root = mcts.get_action_probs(board, temperature)
         
-#         # Store training data
-#         board_tensor = board_to_tensor(board)
-#         board_tensor = torch.tensor(board_tensor, dtype=torch.float32).unsqueeze(0).to(device)
+        # Store training data
+        board_tensor = board_to_tensor(board)
+        board_tensor = torch.tensor(board_tensor, dtype=torch.float32).unsqueeze(0).to(device)
         
-#         # Convert action probs to policy vector
-#         policy_vector = np.zeros(4288)
-#         for move, prob in action_probs.items():
-#             move_idx = move_to_policy_index(move)
-#             policy_vector[move_idx] = prob
+        # Convert action probs to policy vector
+        policy_vector = np.zeros(4288)
+        for move, prob in action_probs.items():
+            move_idx = move_to_policy_index(move)
+            policy_vector[move_idx] = prob
         
-#         game_history.append((board_tensor, policy_vector, board.turn))
+        game_history.append((board_tensor, policy_vector, board.turn))
         
-#         # Select and make move
-#         moves = list(action_probs.keys())
-#         probs = list(action_probs.values())
-#         move = np.random.choice(moves, p=probs)
-#         board.push(move)
+        # Select and make move
+        moves = list(action_probs.keys())
+        probs = list(action_probs.values())
+        move = np.random.choice(moves, p=probs)
+        board.push(move)
 
-#     # Get final result
-#     result = get_game_result(board)
-#     print(f"Game finished: {result}")
-#     return game_history, result
+    # Get final result
+    result = get_game_result(board)
+    print(f"Game finished: {result}")
+    return game_history, result
 
 _PIECE_VALUES = {
     chess.PAWN: 1.0,
