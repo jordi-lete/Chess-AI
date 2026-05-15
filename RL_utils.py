@@ -340,25 +340,13 @@ def material_score_normalized(board):
 
 def get_game_result(board, model=None, device=None):
     """
-    Convert chess game outcome to RL reward (WHITE's POV).
-    For truncated games, bootstraps from the value head if model is provided,
-    otherwise falls back to 0.0 (draw).
+    Returns game outcome in WHITE's POV.
+    Only decisive result is checkmate (±1). Everything else is 0.
+    Model/device params kept for API compatibility but no longer used.
     """
     if board.is_checkmate():
         return 1.0 if board.turn == chess.BLACK else -1.0
-    elif (board.is_stalemate() or board.is_insufficient_material()
-          or board.is_repetition() or board.can_claim_draw()):
-        return 0.0
-    else:
-        # Truncated game: bootstrap value estimate from the model
-        if model is not None and device is not None:
-            with torch.no_grad():
-                tensor = torch.tensor(
-                    board_to_tensor(board), dtype=torch.float32
-                ).unsqueeze(0).to(device)
-                _, value = model(tensor)
-                return float(value.item())  # model outputs in WHITE's POV
-        return 0.0  # safe fallback if no model available
+    return 0.0 
 
 def apply_legal_moves_mask(move_logits, legal_moves_mask):
     """Apply legal moves mask and renormalize probabilities"""
@@ -397,10 +385,11 @@ def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_m
     total_loss = policy_loss + value_loss
     return total_loss, policy_loss, value_loss
 
-def compute_loss_mcts(policy_logits, value_preds, policy_targets, value_targets, kl_div, global_step):
-    kl_beta = max(0.05, 2.0 * (0.95 ** global_step))  # now decays over iterations, not epochs
+def compute_loss_mcts(policy_logits, value_preds, policy_targets, 
+                      value_targets, kl_div, global_step, VALUE_LOSS_WEIGHT=5.0):
+    kl_beta = max(0.05, 0.5 * (0.95 ** global_step))
     policy_log_probs = F.log_softmax(policy_logits, dim=1)
     policy_loss = -torch.sum(policy_targets * policy_log_probs, dim=1).mean()
     value_loss = F.mse_loss(value_preds.view(-1), value_targets)
-    total_loss = policy_loss + value_loss + kl_beta * kl_div
+    total_loss = policy_loss + VALUE_LOSS_WEIGHT * value_loss + kl_beta * kl_div
     return total_loss, policy_loss, value_loss, kl_beta, kl_div
