@@ -31,7 +31,7 @@ class MCTSNode:
             return float('inf')
         
         u_score = c_puct * self.prior * math.sqrt(self.parent.visits) / (1 + self.visits)
-        return self.value() + u_score
+        return -self.value() + u_score
     
     def select_child(self, c_puct=1.0):
         return max(self.children.values(), key=lambda child: child.ucb_score(c_puct))
@@ -106,9 +106,9 @@ class SimpleMCTS:
         root = MCTSNode(board)
         for i in range(self.num_simulations):
             node = root
-            while node.expanded and not node.board.is_game_over():
+            while node.expanded and not node.board.is_game_over(claim_draw=True):
                 node = node.select_child(self.c_puct)
-            if node.board.is_game_over():
+            if node.board.is_game_over(claim_draw=True):
                 result = get_game_result(node.board)
                 value = result if node.board.turn == chess.WHITE else -result
             else:
