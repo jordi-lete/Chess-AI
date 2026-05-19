@@ -387,7 +387,7 @@ def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_m
 
 def compute_loss_mcts(policy_logits, value_preds, policy_targets, 
                       value_targets, kl_div, global_step, VALUE_LOSS_WEIGHT=5.0):
-    kl_beta = max(0.05, 0.5 * (0.95 ** global_step))
+    kl_beta = max(0.15, 0.5 * (0.95 ** global_step))
     policy_log_probs = F.log_softmax(policy_logits, dim=1)
     policy_loss = -torch.sum(policy_targets * policy_log_probs, dim=1).mean()
     value_loss = F.mse_loss(value_preds.view(-1), value_targets)
