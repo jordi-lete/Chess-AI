@@ -37,7 +37,7 @@ class MCTSNode:
         return max(self.children.values(), key=lambda child: child.ucb_score(c_puct))
     
     def expand(self, model, device, add_noise=False):
-        if self.expanded or self.board.is_game_over():
+        if self.expanded or self.board.is_game_over(claim_draw=True):
             return
 
         board_tensor = board_to_tensor(self.board)
@@ -101,42 +101,39 @@ class SimpleMCTS:
         self.device = device
         self.num_simulations = num_simulations
         self.c_puct = c_puct
-        self._root = None  # cached root for tree reuse
-
-    def reset(self):
-        """Call at the start of each new game to discard any cached tree."""
         self._root = None
 
-    def advance_root(self, move):
-        if self._root is not None and move in self._root.children:
-            self._root = self._root.children[move]
-            self._root.parent = None
+    def reset(self):
+        self._root = None
 
-            if self._root.expanded and self._root.children:
-                legal_moves = list(self._root.children.keys())
-                alpha = DIRICHLET_ALPHA / len(legal_moves)
-                noise = np.random.dirichlet([alpha] * len(legal_moves))
-                for i, m in enumerate(legal_moves):
-                    child = self._root.children[m]
-                    child.prior = ((1 - DIRICHLET_EPSILON) * child.prior
-                                + DIRICHLET_EPSILON * noise[i])
-                # Re-normalise so priors sum to 1 across siblings
-                total = sum(c.prior for c in self._root.children.values())
-                if total > 0:
-                    for child in self._root.children.values():
-                        child.prior /= total
-        else:
-            self._root = None  # opponent played something unexplored; start fresh
+    def initialise_root(self, board):
+        """Ensure root exists for the given board position."""
+        if self._root is None or self._root.board != board:
+            self._root = MCTSNode(board)
+        return self._root
 
-    def search(self, board):
-        # Reuse cached root if the board matches, otherwise start fresh
-        if self._root is not None and self._root.board == board:
-            root = self._root
-        else:
-            root = MCTSNode(board)
-            self._root = root
+    def select_leaf(self):
+        """
+        Descend from root to an unexpanded or terminal leaf using UCB.
+        Returns the leaf node. Does NOT evaluate — caller batches that.
+        Returns None if root not initialised.
+        """
+        if self._root is None:
+            return None
+        node = self._root
+        while node.expanded and not node.board.is_game_over(claim_draw=True):
+            node = node.select_child(self.c_puct)
+        return node
 
-        for i in range(self.num_simulations):
+    def get_action_probs(self, board, temperature=1.0):
+        """
+        Standard single-game search (used in evaluation, not parallel self-play).
+        """
+        if self._root is None or self._root.board != board:
+            self._root = MCTSNode(board)
+
+        root = self._root
+        for _ in range(self.num_simulations):
             node = root
             while node.expanded and not node.board.is_game_over(claim_draw=True):
                 node = node.select_child(self.c_puct)
@@ -144,32 +141,45 @@ class SimpleMCTS:
                 result = get_game_result(node.board)
                 value = result if node.board.turn == chess.WHITE else -result
             else:
-                # Only add Dirichlet noise at the current root
                 value = node.expand(self.model, self.device, add_noise=(node is root))
                 if value is None:
                     continue
             node.backup(value)
-        return root
 
-    def get_action_probs(self, board, temperature=1.0):
-        root = self.search(board)
         if not root.children:
             return {}, None
         visits = {move: child.visits for move, child in root.children.items()}
-        total_visits = sum(visits.values())
         moves = list(visits.keys())
         visit_counts = np.array(list(visits.values()), dtype=np.float32)
+        total_visits = sum(visits.values())
         if total_visits == 0:
-            prob = 1.0 / len(visits)
-            action_probs = {move: prob for move in moves}
+            action_probs = {m: 1.0 / len(moves) for m in moves}
+        elif temperature == 0:
+            best = moves[np.argmax(visit_counts)]
+            action_probs = {m: (1.0 if m == best else 0.0) for m in moves}
         else:
-            if temperature == 0:
-                best_move = moves[np.argmax(visit_counts)]
-                action_probs = {move: (1.0 if move == best_move else 0.0) for move in moves}
-            else:
-                if temperature != 1.0:
-                    visit_counts = np.power(visit_counts, 1.0 / temperature)
-                probs = visit_counts / np.sum(visit_counts)
-                action_probs = {move: prob for move, prob in zip(moves, probs)}
+            if temperature != 1.0:
+                visit_counts = np.power(visit_counts, 1.0 / temperature)
+            probs = visit_counts / np.sum(visit_counts)
+            action_probs = {m: p for m, p in zip(moves, probs)}
         return action_probs, root
+
+    def advance_root(self, move):
+        if self._root is not None and move in self._root.children:
+            self._root = self._root.children[move]
+            self._root.parent = None
+            if self._root.expanded and self._root.children:
+                legal_moves = list(self._root.children.keys())
+                alpha = DIRICHLET_ALPHA / len(legal_moves)
+                noise = np.random.dirichlet([alpha] * len(legal_moves))
+                for i, m in enumerate(legal_moves):
+                    child = self._root.children[m]
+                    child.prior = ((1 - DIRICHLET_EPSILON) * child.prior
+                                   + DIRICHLET_EPSILON * noise[i])
+                total = sum(c.prior for c in self._root.children.values())
+                if total > 0:
+                    for child in self._root.children.values():
+                        child.prior /= total
+        else:
+            self._root = None
     
