@@ -58,19 +58,24 @@ class ReplayBuffer:
         if len(self.buffer) == 0:
             return []
 
+        # Weight game selection by length so each position is equally likely
+        game_lengths = [len(game_history) for game_history, _ in self.buffer]
+        total_positions = sum(game_lengths)
+        if total_positions == 0:
+            return []
+        weights = [l / total_positions for l in game_lengths]
+
         examples = []
         for _ in range(n_examples):
-            game_idx = self.rng.randrange(len(self.buffer))
+            # Sample game proportional to its length
+            game_idx = self.rng.choices(range(len(self.buffer)), weights=weights)[0]
             game_history, result = self.buffer[game_idx]
             if len(game_history) == 0:
                 continue
             pos_idx = self.rng.randrange(len(game_history))
             board_tensor, policy_vector, turn = game_history[pos_idx]
 
-            # convert result (white POV) to current player's perspective
             value = result if turn else -result
-
-            # Return board_tensor as CPU torch.Tensor (no .to(device) here)
             examples.append((board_tensor, policy_vector, value))
 
         return examples
