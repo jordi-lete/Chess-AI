@@ -101,9 +101,41 @@ class SimpleMCTS:
         self.device = device
         self.num_simulations = num_simulations
         self.c_puct = c_puct
-    
+        self._root = None  # cached root for tree reuse
+
+    def reset(self):
+        """Call at the start of each new game to discard any cached tree."""
+        self._root = None
+
+    def advance_root(self, move):
+        if self._root is not None and move in self._root.children:
+            self._root = self._root.children[move]
+            self._root.parent = None
+
+            if self._root.expanded and self._root.children:
+                legal_moves = list(self._root.children.keys())
+                alpha = DIRICHLET_ALPHA / len(legal_moves)
+                noise = np.random.dirichlet([alpha] * len(legal_moves))
+                for i, m in enumerate(legal_moves):
+                    child = self._root.children[m]
+                    child.prior = ((1 - DIRICHLET_EPSILON) * child.prior
+                                + DIRICHLET_EPSILON * noise[i])
+                # Re-normalise so priors sum to 1 across siblings
+                total = sum(c.prior for c in self._root.children.values())
+                if total > 0:
+                    for child in self._root.children.values():
+                        child.prior /= total
+        else:
+            self._root = None  # opponent played something unexplored; start fresh
+
     def search(self, board):
-        root = MCTSNode(board)
+        # Reuse cached root if the board matches, otherwise start fresh
+        if self._root is not None and self._root.board == board:
+            root = self._root
+        else:
+            root = MCTSNode(board)
+            self._root = root
+
         for i in range(self.num_simulations):
             node = root
             while node.expanded and not node.board.is_game_over(claim_draw=True):
@@ -112,12 +144,13 @@ class SimpleMCTS:
                 result = get_game_result(node.board)
                 value = result if node.board.turn == chess.WHITE else -result
             else:
-                value = node.expand(self.model, self.device, add_noise=(node.parent is None))
+                # Only add Dirichlet noise at the current root
+                value = node.expand(self.model, self.device, add_noise=(node is root))
                 if value is None:
                     continue
             node.backup(value)
         return root
-    
+
     def get_action_probs(self, board, temperature=1.0):
         root = self.search(board)
         if not root.children:
