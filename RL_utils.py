@@ -385,9 +385,28 @@ def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_m
     total_loss = policy_loss + value_loss
     return total_loss, policy_loss, value_loss
 
-def compute_loss_mcts(policy_logits, value_preds, policy_targets, 
-                      value_targets, kl_div, global_step, VALUE_LOSS_WEIGHT=5.0):
-    kl_beta = max(0.15, 0.5 * (0.95 ** global_step))
+def compute_loss_mcts(policy_logits, value_preds, policy_targets,
+                      value_targets, kl_div, global_step, VALUE_LOSS_WEIGHT=5.0,
+                      kl_target=1.8, kl_floor=0.15, kl_ceil=0.6):
+    """
+    Adaptive KL beta: if observed KL exceeds kl_target, beta increases
+    to push back. If below target, it relaxes toward the floor.
+    
+    kl_target: the KL divergence from CNN you're comfortable with (~1.8 
+               is a reasonable ceiling — high enough for endgame freedom,
+               low enough to preserve opening style)
+    kl_floor:  minimum beta when KL is well below target
+    kl_ceil:   maximum beta when KL is well above target
+    """
+    kl_val = kl_div.item() if isinstance(kl_div, torch.Tensor) else float(kl_div)
+    
+    # Scale beta proportionally to how far KL exceeds target
+    if kl_val > kl_target:
+        overshoot = (kl_val - kl_target) / kl_target  # 0 at target, 1 at 2x target
+        kl_beta = kl_floor + (kl_ceil - kl_floor) * min(overshoot, 1.0)
+    else:
+        kl_beta = kl_floor
+
     policy_log_probs = F.log_softmax(policy_logits, dim=1)
     policy_loss = -torch.sum(policy_targets * policy_log_probs, dim=1).mean()
     value_loss = F.mse_loss(value_preds.view(-1), value_targets)
