@@ -386,8 +386,8 @@ def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_m
     return total_loss, policy_loss, value_loss
 
 def compute_loss_mcts(policy_logits, value_preds, policy_targets,
-                      value_targets, kl_div, global_step, VALUE_LOSS_WEIGHT=5.0,
-                      kl_target=1.8, kl_floor=0.15, kl_ceil=0.6):
+                      value_targets, kl_div, VALUE_LOSS_WEIGHT=5.0,
+                      kl_target=1.8, kl_floor=0.15, kl_ceil=1.0):
     """
     Adaptive KL beta: if observed KL exceeds kl_target, beta increases
     to push back. If below target, it relaxes toward the floor.
