@@ -1,4 +1,5 @@
 import chess
+import chess.engine
 from mcts import SimpleMCTS
 from chess_utils import move_to_policy_index, policy_index_to_move, board_to_tensor
 from RL_utils import get_game_result
@@ -7,7 +8,7 @@ import torch
 import numpy as np
 
 def play_game_vs_stockfish(model, device, stockfish_path, 
-                            skill_level=5, num_simulations=100,
+                            stockfish_elo=800, num_simulations=100,
                             rl_is_white=True, start_position=None,
                             max_moves=200):
     """
@@ -18,7 +19,10 @@ def play_game_vs_stockfish(model, device, stockfish_path,
     board = start_position.copy() if start_position else chess.Board()
     
     engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
-    engine.configure({"Skill Level": skill_level})
+    engine.configure({
+        "UCI_LimitStrength": True,
+        "UCI_Elo": stockfish_elo
+    })
     
     mcts = SimpleMCTS(model, device, num_simulations)
     mcts.reset()
