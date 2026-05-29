@@ -37,7 +37,7 @@ class MCTSNode:
         return max(self.children.values(), key=lambda child: child.ucb_score(c_puct))
     
     def expand(self, model, device, add_noise=False):
-        if self.expanded or self.board.is_game_over():
+        if self.expanded or self.board.is_game_over(claim_draw=True):
             return
 
         board_tensor = board_to_tensor(self.board)
@@ -120,11 +120,6 @@ class SimpleMCTS:
                     child = self._root.children[m]
                     child.prior = ((1 - DIRICHLET_EPSILON) * child.prior
                                 + DIRICHLET_EPSILON * noise[i])
-                # Re-normalise so priors sum to 1 across siblings
-                total = sum(c.prior for c in self._root.children.values())
-                if total > 0:
-                    for child in self._root.children.values():
-                        child.prior /= total
         else:
             self._root = None  # opponent played something unexplored; start fresh
 

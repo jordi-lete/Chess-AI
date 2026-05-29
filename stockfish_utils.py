@@ -8,7 +8,7 @@ import torch
 import numpy as np
 
 def play_game_vs_stockfish(model, device, stockfish_path, 
-                            stockfish_elo=800, num_simulations=100,
+                            stockfish_elo=1320, num_simulations=200,
                             rl_is_white=True, start_position=None,
                             max_moves=200):
     """
@@ -35,7 +35,10 @@ def play_game_vs_stockfish(model, device, stockfish_path,
             is_rl_turn = (board.turn == chess.WHITE) == rl_is_white
 
             if is_rl_turn:
-                temperature = max(0.5, 1.0 * (0.99 ** move_count))
+                # Actual ply in the real game
+                actual_ply = (board.fullmove_number - 1) * 2 + (0 if board.turn == chess.WHITE else 1)
+                temperature = 1.0 if actual_ply < 30 else 0.5
+
                 action_probs, _ = mcts.get_action_probs(board, temperature)
                 if not action_probs:
                     break
