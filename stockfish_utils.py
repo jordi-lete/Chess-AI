@@ -44,7 +44,7 @@ def play_game_vs_stockfish(model, device, stockfish_path,
                     break
 
                 # Build policy vector and store training example
-                mcts_policy = np.zeros(4288, dtype=np.float32)
+                mcts_policy = np.zeros(4672, dtype=np.float32)
                 for move, prob in action_probs.items():
                     mcts_policy[move_to_policy_index(move)] = prob
 

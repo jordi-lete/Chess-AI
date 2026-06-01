@@ -1,27 +1,27 @@
 import torch
-from model import ChessModel
+# from model import ChessModel
 from ResNet_model import ResNetChessModel
 
 ''' ------------------ LOAD MODEL ------------------ '''
 
-def load_model(model_path=None, input_channels=19):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# def load_model(model_path=None, input_channels=19):
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Create model instance
-    model = ChessModel(input_channels=input_channels).to(device)
+#     # Create model instance
+#     model = ChessModel(input_channels=input_channels).to(device)
     
-    # Load saved weights
-    if model_path:
-        checkpoint = torch.load(model_path, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print(f"Model loaded from {model_path}")
-    else:
-        print("Initialized new model.")
+#     # Load saved weights
+#     if model_path:
+#         checkpoint = torch.load(model_path, map_location=device)
+#         model.load_state_dict(checkpoint['model_state_dict'])
+#         print(f"Model loaded from {model_path}")
+#     else:
+#         print("Initialized new model.")
     
-    model.eval()  # Set to evaluation mode
-    return model, device
+#     model.eval()  # Set to evaluation mode
+#     return model, device
 
-def load_resnet_model(model_path=None, input_channels=19):
+def load_resnet_model(model_path=None, input_channels=18):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Create model instance
@@ -295,7 +295,7 @@ def play_game_with_mcts(model, device, starting_board, max_moves=100, temperatur
         board_tensor = torch.tensor(board_tensor, dtype=torch.float32).unsqueeze(0).to(device)
         
         # Convert action probs to policy vector
-        policy_vector = np.zeros(4288)
+        policy_vector = np.zeros(4672)
         for move, prob in action_probs.items():
             move_idx = move_to_policy_index(move)
             policy_vector[move_idx] = prob

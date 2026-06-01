@@ -52,7 +52,7 @@ class ReplayBuffer:
         Sample n_examples uniformly across positions inside games.
         Returns list of (board_tensor, policy_vector, value) where:
           - board_tensor is a torch.Tensor (CPU) (shape [1,C,H,W])
-          - policy_vector is np.ndarray (4288,)
+          - policy_vector is np.ndarray (4672,)
           - value is float from perspective of player to move in that stored position (+1 = player to move winning)
         """
         if len(self.buffer) == 0:
