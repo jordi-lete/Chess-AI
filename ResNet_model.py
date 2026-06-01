@@ -16,7 +16,7 @@ class ResidualBlock(nn.Module):
         return F.relu(x + residual)
 
 class ResNetChessModel(nn.Module):
-    def __init__(self, input_channels=19, num_blocks=19):
+    def __init__(self, input_channels=18, num_blocks=19):
         super().__init__()
         self.conv_in = nn.Conv2d(input_channels, 256, kernel_size=3, padding=1)
         self.bn_in = nn.BatchNorm2d(256)
@@ -28,7 +28,7 @@ class ResNetChessModel(nn.Module):
             nn.BatchNorm2d(2),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(2 * 8 * 8, 4288)
+            nn.Linear(2 * 8 * 8, 4672)
         )
 
         self.value_head = nn.Sequential(

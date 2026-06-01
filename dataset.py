@@ -1,14 +1,18 @@
+import torch
 from torch.utils.data import Dataset
 
 class ChessDataset(Dataset):
-
-    def __init__(self, X, y_policy, y_value):
-        self.X        = X
-        self.y_policy = y_policy
-        self.y_value  = y_value   # float tensor, shape (N,)
+    """Lazy dataset — converts to tensors on demand, avoiding a ~19GB upfront allocation."""
+    def __init__(self, data):
+        self.data = data  # list of (np.ndarray, int, float)
 
     def __len__(self):
-        return len(self.X)
+        return len(self.data)
 
     def __getitem__(self, idx):
-        return self.X[idx], self.y_policy[idx], self.y_value[idx]
+        board_tensor, move_idx, value = self.data[idx]
+        return (
+            torch.tensor(board_tensor, dtype=torch.float32),
+            torch.tensor(move_idx,     dtype=torch.long),
+            torch.tensor(value,        dtype=torch.float32),
+        )

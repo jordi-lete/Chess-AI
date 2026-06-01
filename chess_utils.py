@@ -2,7 +2,7 @@ import chess
 import chess.pgn
 import numpy as np
 import torch
-from model import ChessModel
+# from model import ChessModel
 
 POLICY_SIZE = 4672  # 4096 normal moves + 192*3 underpromotions
 
@@ -17,7 +17,7 @@ def board_to_tensor(board: chess.Board) -> np.ndarray:
         my_color: True for white's perspective, False for black's
     
     Returns:
-        numpy array of shape (19, 8, 8) with the following channels:
+        numpy array of shape (18, 8, 8) with the following channels:
         0-5: White pieces (P, N, B, R, Q, K)
         6-11: Black pieces (P, N, B, R, Q, K)
         12: Castling rights (white kingside)
@@ -25,10 +25,9 @@ def board_to_tensor(board: chess.Board) -> np.ndarray:
         14: Castling rights (black kingside)
         15: Castling rights (black queenside)
         16: En passant target squares
-        17: Turn indicator (1.0 if it's my_color's turn)
-        18: Check indicator (1.0 if current player is in check)
+        17: Check indicator (1.0 if current player is in check)
     """
-    tensor = np.zeros((19, 8, 8), dtype=np.float32)
+    tensor = np.zeros((18, 8, 8), dtype=np.float32)
     
     # Always encode from current player's perspective
     # Current player's pieces in channels 0-5, opponent in 6-11
@@ -59,14 +58,16 @@ def board_to_tensor(board: chess.Board) -> np.ndarray:
         tensor[channel, row, col] = 1.0
     
     # Castling rights (channels 12-15)
-    if board.has_kingside_castling_rights(chess.WHITE):
-        tensor[12, :, :] = 1.0
-    if board.has_queenside_castling_rights(chess.WHITE):
-        tensor[13, :, :] = 1.0
-    if board.has_kingside_castling_rights(chess.BLACK):
-        tensor[14, :, :] = 1.0
-    if board.has_queenside_castling_rights(chess.BLACK):
-        tensor[15, :, :] = 1.0
+    if board.turn == chess.WHITE:
+        if board.has_kingside_castling_rights(chess.WHITE):  tensor[12, :, :] = 1.0
+        if board.has_queenside_castling_rights(chess.WHITE): tensor[13, :, :] = 1.0
+        if board.has_kingside_castling_rights(chess.BLACK):  tensor[14, :, :] = 1.0
+        if board.has_queenside_castling_rights(chess.BLACK): tensor[15, :, :] = 1.0
+    else:
+        if board.has_kingside_castling_rights(chess.BLACK):  tensor[12, :, :] = 1.0
+        if board.has_queenside_castling_rights(chess.BLACK): tensor[13, :, :] = 1.0
+        if board.has_kingside_castling_rights(chess.WHITE):  tensor[14, :, :] = 1.0
+        if board.has_queenside_castling_rights(chess.WHITE): tensor[15, :, :] = 1.0
     
     # En passant (channel 16)
     if board.ep_square is not None:
@@ -74,13 +75,9 @@ def board_to_tensor(board: chess.Board) -> np.ndarray:
         ep_col = chess.square_file(board.ep_square)
         tensor[16, ep_row, ep_col] = 1.0
     
-    # Turn indicator (channel 17)
-    if board.turn:
-        tensor[17, :, :] = 1.0
-    
-    # Check indicator (channel 18)
+    # Check indicator (channel 17)
     if board.is_check():
-        tensor[18, :, :] = 1.0
+        tensor[17, :, :] = 1.0
     
     return tensor
 
@@ -245,15 +242,21 @@ def extract_puzzle_data(puzzle_csv_path: str,
 
             # Remaining moves are the solution
             valid = True
+            solver_color = board.turn  # solver moves first after the lead-in move
+
             for move_uci in moves[1:]:
                 try:
                     move = chess.Move.from_uci(move_uci)
                     if move not in board.legal_moves:
                         valid = False
                         break
-                    position_tensor = board_to_tensor(board)
-                    move_index = move_to_policy_index(move)
-                    training_data.append((position_tensor, move_index, 1.0))
+
+                    # Only store the solver's moves, not forced opponent replies
+                    if board.turn == solver_color:
+                        position_tensor = board_to_tensor(board)
+                        move_index = move_to_policy_index(move)
+                        training_data.append((position_tensor, move_index, 1.0))
+
                     board.push(move)
                 except Exception:
                     valid = False
@@ -346,20 +349,6 @@ def policy_index_to_move(policy_index: int, board: chess.Board) -> chess.Move:
 
     to_sq = chess.square(to_file, to_rank)
     return chess.Move(from_sq, to_sq, promo_type)
-
-# Load the model
-def load_model(model_path, input_channels=19):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # Create model instance
-    model = ChessModel(input_channels=input_channels).to(device)
-    
-    # Load saved weights
-    checkpoint = torch.load(model_path, map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    
-    model.eval()  # Set to evaluation mode
-    return model, device
 
 def test_single_position(model, board, device):
     best_move = None
