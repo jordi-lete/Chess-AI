@@ -386,8 +386,8 @@ def compute_loss(policy_logits, value_pred, move_targets, value_targets, legal_m
     return total_loss, policy_loss, value_loss
 
 def compute_loss_mcts(policy_logits, value_preds, policy_targets,
-                      value_targets, kl_div, VALUE_LOSS_WEIGHT=5.0,
-                      kl_target=1.8, kl_floor=0.15, kl_ceil=1.0):
+                      value_targets, kl_div, VALUE_LOSS_WEIGHT=5.0, kl_beta_override=None,
+                      kl_target=2.5, kl_floor=0.05, kl_ceil=0.8):
     """
     Adaptive KL beta: if observed KL exceeds kl_target, beta increases
     to push back. If below target, it relaxes toward the floor.
@@ -398,14 +398,17 @@ def compute_loss_mcts(policy_logits, value_preds, policy_targets,
     kl_floor:  minimum beta when KL is well below target
     kl_ceil:   maximum beta when KL is well above target
     """
-    kl_val = kl_div.item() if isinstance(kl_div, torch.Tensor) else float(kl_div)
-    
-    # Scale beta proportionally to how far KL exceeds target
-    if kl_val > kl_target:
-        overshoot = (kl_val - kl_target) / kl_target  # 0 at target, 1 at 2x target
-        kl_beta = kl_floor + (kl_ceil - kl_floor) * min(overshoot, 1.0)
+    if kl_beta_override is not None:
+        kl_beta = kl_beta_override
     else:
-        kl_beta = kl_floor
+        kl_val = kl_div.item() if isinstance(kl_div, torch.Tensor) else float(kl_div)
+        
+        # Scale beta proportionally to how far KL exceeds target
+        if kl_val > kl_target:
+            overshoot = (kl_val - kl_target) / kl_target  # 0 at target, 1 at 2x target
+            kl_beta = kl_floor + (kl_ceil - kl_floor) * min(overshoot, 1.0)
+        else:
+            kl_beta = kl_floor
 
     policy_log_probs = F.log_softmax(policy_logits, dim=1)
     policy_loss = -torch.sum(policy_targets * policy_log_probs, dim=1).mean()
