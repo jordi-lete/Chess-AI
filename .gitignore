@@ -1,7 +1,9 @@
 *.pgn
+*.png
 *.cpython*
 *.pth
 *.pt
+*.csv
 stockfish/
 diagnostics/
 venv/
