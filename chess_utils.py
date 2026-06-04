@@ -350,7 +350,7 @@ def policy_index_to_move(policy_index: int, board: chess.Board) -> chess.Move:
     to_sq = chess.square(to_file, to_rank)
     return chess.Move(from_sq, to_sq, promo_type)
 
-def test_single_position(model, board, device):
+def test_single_position(model, board, device, debug=True):
     best_move = None
 
     # Convert board to tensor
@@ -371,11 +371,11 @@ def test_single_position(model, board, device):
 
     # Get top 5 moves among legal ones
     top_moves = torch.topk(probabilities, 5)
-
-    print("Top 5 predicted legal moves:")
+    
+    print("Top 5 predicted legal moves:") if debug else None
     for i, (prob, move_idx) in enumerate(zip(top_moves.values[0], top_moves.indices[0])):
         move = policy_index_to_move(move_idx.item(), board)
-        print(f"{i+1}. {move} (confidence: {prob:.1%})")
+        print(f"{i+1}. {move} (confidence: {prob:.1%})") if debug else None
         if best_move is None:
             best_move = move
 
