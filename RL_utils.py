@@ -415,3 +415,17 @@ def compute_loss_mcts(policy_logits, value_preds, policy_targets,
     value_loss = F.mse_loss(value_preds.view(-1), value_targets)
     total_loss = policy_loss + VALUE_LOSS_WEIGHT * value_loss + kl_beta * kl_div
     return total_loss, policy_loss, value_loss, kl_beta, kl_div
+
+''' --- Archived blending functions for RL --- '''
+
+def blend_policies(mcts_policy, cnn_policy, alpha=0.7):
+    """
+    Blend MCTS visit-count policy with CNN prior.
+    alpha: weight on MCTS (1-alpha on CNN).
+    Both inputs must already be normalised probability vectors.
+    """
+    blended = alpha * mcts_policy + (1 - alpha) * cnn_policy
+    total = blended.sum()
+    if total > 0:
+        blended /= total
+    return blended

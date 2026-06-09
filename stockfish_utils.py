@@ -7,6 +7,8 @@ import random
 import torch
 import numpy as np
 
+STOCKFISH_ELO = 1320
+
 def play_game_vs_stockfish(model, device, stockfish_path, 
                             stockfish_elo=1320, num_simulations=200,
                             rl_is_white=True, start_position=None,
@@ -73,4 +75,80 @@ def play_game_vs_stockfish(model, device, stockfish_path,
 
     game_result = get_game_result(board)
     return game_history, game_result
+
+
+def generate_stockfish_games(model, device, stockfish_path,
+                              start_positions, num_games=30,
+                              stockfish_elo=None, num_simulations=100,
+                              metrics=None):
+    data = []
+    wins, losses, draws = 0, 0, 0
+    
+    if stockfish_elo is None:
+        stockfish_elo = STOCKFISH_ELO
+
+    for game_idx in range(num_games):
+        rl_is_white = (game_idx % 2 == 0)
+        start = random.choice(start_positions)
+
+        try:
+            game_history, result = play_game_vs_stockfish(
+                model, device, stockfish_path,
+                stockfish_elo=stockfish_elo,
+                num_simulations=num_simulations,
+                rl_is_white=rl_is_white,
+                start_position=start
+            )
+        except Exception as e:
+            print(f"Stockfish game {game_idx+1} failed: {e}")
+            continue
+
+        data.append((game_history, result))
+
+        rl_won = (result > 0 and rl_is_white) or (result < 0 and not rl_is_white)
+        if result == 0:
+            draws += 1
+        elif rl_won:
+            wins += 1
+        else:
+            losses += 1
+
+        print(f"  [Stockfish game {game_idx+1}/{num_games}] "
+                 f"Stockfish ELO={stockfish_elo} | "
+                 f"RL={'White' if rl_is_white else 'Black'} | "
+                 f"result={result:+.0f} | "
+                 f"rl_moves={len(game_history)}")
+
+        if metrics is not None:
+            metrics.sf_results.append(result)
+            metrics.sf_game_lengths.append(len(game_history))
+            if result != 0:
+                metrics.sf_terminations['checkmate'] += 1
+            else:
+                metrics.sf_terminations['draw'] += 1
+
+    total = wins + losses + draws
+    win_rate = (wins + 0.5 * draws) / total if total > 0 else 0.0
+    print(f"Stockfish batch — ELO={stockfish_elo} | "
+             f"W={wins} L={losses} D={draws} | "
+             f"score={wins + 0.5*draws:.1f}/{total} ({win_rate:.0%})")
+
+    stats = {'wins': wins, 'losses': losses, 'draws': draws, 'win_rate': win_rate}
+    return data, stats
+
+def update_stockfish_elo(current_elo, win_rate,
+                          promote_threshold=0.60,
+                          demote_threshold=0.20,
+                          step=50, min_elo=1320, max_elo=2000):
+    if win_rate > promote_threshold and current_elo < max_elo:
+        new_elo = min(current_elo + step, max_elo)
+        print(f"Stockfish Elo promoted: {current_elo} → {new_elo} "
+                 f"(win_rate={win_rate:.0%})")
+        return new_elo
+    if win_rate < demote_threshold and current_elo > min_elo:
+        new_elo = max(current_elo - step, min_elo)
+        print(f"Stockfish Elo demoted: {current_elo} → {new_elo} "
+                 f"(win_rate={win_rate:.0%})")
+        return new_elo
+    return current_elo
 
