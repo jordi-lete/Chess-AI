@@ -47,10 +47,7 @@ class MCTSNode:
             policy_logits, value = model(input_tensor)
             policy_probs = torch.softmax(policy_logits, dim=1).cpu().numpy()[0]
 
-        # value is network output in WHITE's POV (tanh -> [-1,1])
-        v = float(value.item())
-        # convert to the *current node* player's perspective (+ = good for player to move)
-        value_for_current_player = v if self.board.turn == chess.WHITE else -v
+        value_for_current_player = float(value.item())
 
         # Mask illegal moves
         legal_moves = list(self.board.legal_moves)
