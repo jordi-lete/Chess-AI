@@ -62,7 +62,7 @@ class MCTSNode:
 
         # Add Dirichlet noise at root
         if add_noise and len(legal_moves) > 0:
-            alpha = DIRICHLET_ALPHA / len(legal_moves)
+            alpha = DIRICHLET_ALPHA
             noise = np.random.dirichlet([alpha] * len(legal_moves))
             for i, move in enumerate(legal_moves):
                 idx = move_to_policy_index(move)
@@ -108,25 +108,26 @@ class SimpleMCTS:
         if self._root is not None and move in self._root.children:
             self._root = self._root.children[move]
             self._root.parent = None
-
-            if self._root.expanded and self._root.children:
-                legal_moves = list(self._root.children.keys())
-                alpha = DIRICHLET_ALPHA / len(legal_moves)
-                noise = np.random.dirichlet([alpha] * len(legal_moves))
-                for i, m in enumerate(legal_moves):
-                    child = self._root.children[m]
-                    child.prior = ((1 - DIRICHLET_EPSILON) * child.prior
-                                + DIRICHLET_EPSILON * noise[i])
         else:
             self._root = None  # opponent played something unexplored; start fresh
 
     def search(self, board):
-        # Reuse cached root if the board matches, otherwise start fresh
         if self._root is not None and self._root.board == board:
             root = self._root
         else:
             root = MCTSNode(board)
             self._root = root
+
+        # Apply fresh Dirichlet noise to root at the start of each search
+        # If already expanded (reused tree), update children's priors directly
+        if root.expanded and root.children:
+            legal_moves = list(root.children.keys())
+            noise = np.random.dirichlet([DIRICHLET_ALPHA] * len(legal_moves))
+            for i, m in enumerate(legal_moves):
+                child = root.children[m]
+                child.prior = ((1 - DIRICHLET_EPSILON) * child.prior
+                            + DIRICHLET_EPSILON * noise[i])
+        # If not yet expanded, noise is handled inside expand() via add_noise=(node is root)
 
         for i in range(self.num_simulations):
             node = root
@@ -136,7 +137,6 @@ class SimpleMCTS:
                 result = get_game_result(node.board)
                 value = result if node.board.turn == chess.WHITE else -result
             else:
-                # Only add Dirichlet noise at the current root
                 value = node.expand(self.model, self.device, add_noise=(node is root))
                 if value is None:
                     continue
