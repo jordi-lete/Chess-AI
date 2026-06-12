@@ -37,9 +37,7 @@ def play_game_vs_stockfish(model, device, stockfish_path,
             is_rl_turn = (board.turn == chess.WHITE) == rl_is_white
 
             if is_rl_turn:
-                # Actual ply in the real game
-                actual_ply = (board.fullmove_number - 1) * 2 + (0 if board.turn == chess.WHITE else 1)
-                temperature = 1.0 if actual_ply < 30 else 0.5
+                temperature = 0.0
 
                 action_probs, _ = mcts.get_action_probs(board, temperature)
                 if not action_probs:
@@ -56,11 +54,14 @@ def play_game_vs_stockfish(model, device, stockfish_path,
                 game_history.append((board_tensor, mcts_policy, board.turn))
 
                 # Select move
-                probs = mcts_policy / mcts_policy.sum()
-                move_idx = np.random.choice(len(probs), p=probs)
-                move = policy_index_to_move(move_idx, board)
-                if move not in board.legal_moves:
-                    move = random.choice(list(board.legal_moves))
+                if temperature == 0.0:
+                    move = max(action_probs, key=action_probs.get)
+                else:
+                    probs = mcts_policy / mcts_policy.sum()
+                    move_idx = np.random.choice(len(probs), p=probs)
+                    move = policy_index_to_move(move_idx, board)
+                    if move not in board.legal_moves:
+                        move = random.choice(list(board.legal_moves))
             else:
                 # Stockfish move — time limit keeps it responsive
                 result = engine.play(board, chess.engine.Limit(time=0.05))
@@ -120,7 +121,8 @@ def generate_stockfish_games(model, device, stockfish_path,
                  f"rl_moves={len(game_history)}")
 
         if metrics is not None:
-            metrics.sf_results.append(result)
+            rl_perspective = result if rl_is_white else -result   # +1 = model wins
+            metrics.sf_results.append(rl_perspective)
             metrics.sf_game_lengths.append(len(game_history))
             if result != 0:
                 metrics.sf_terminations['checkmate'] += 1
