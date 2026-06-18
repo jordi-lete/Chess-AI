@@ -154,3 +154,50 @@ def update_stockfish_elo(current_elo, win_rate,
         return new_elo
     return current_elo
 
+
+def play_vs_stockfish_raw(model, device, stockfish_path,
+                          num_games=40, stockfish_elo=1320, max_moves=200):
+    """
+    Raw-policy-only benchmark (no MCTS) — fast, cheap canary metric.
+    Independent of MCTS, so it catches policy degradation that the
+    MCTS-based training-time Stockfish games might mask.
+    """
+    import chess_utils
+
+    model.eval()
+    engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+    engine.configure({"UCI_LimitStrength": True, "UCI_Elo": stockfish_elo})
+    results = {"model_win": 0, "draw": 0, "stockfish_win": 0}
+
+    for game_num in range(num_games):
+        board = chess.Board()
+        model_is_white = (game_num % 2 == 0)
+        move_count = 0
+
+        while not board.is_game_over(claim_draw=True) and move_count < max_moves:
+            if (board.turn == chess.WHITE) == model_is_white:
+                move = chess_utils.test_single_position(model, board, device, debug=False)
+                if move not in board.legal_moves:
+                    move = list(board.legal_moves)[0]
+            else:
+                result = engine.play(board, chess.engine.Limit(time=0.1))
+                move = result.move
+            board.push(move)
+            move_count += 1
+
+        outcome = board.outcome(claim_draw=True)
+        if outcome is None or outcome.winner is None:
+            results["draw"] += 1
+        elif (outcome.winner == chess.WHITE) == model_is_white:
+            results["model_win"] += 1
+        else:
+            results["stockfish_win"] += 1
+
+    engine.quit()
+    total = results["model_win"] + results["draw"] + results["stockfish_win"]
+    score = (results["model_win"] + 0.5 * results["draw"]) / total if total else 0.0
+    print(f"Raw-policy batch — ELO={stockfish_elo} | "
+          f"W={results['model_win']} L={results['stockfish_win']} D={results['draw']} | "
+          f"score={score:.0%}")
+    results['score'] = score
+    return results
