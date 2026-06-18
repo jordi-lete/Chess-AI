@@ -281,7 +281,7 @@ def play_game_with_mcts(model, device, starting_board, max_moves=100, temperatur
     """Play a game using MCTS"""
     board = starting_board.copy()
     model.eval()
-    mcts = SimpleMCTS(model, device, num_simulations)
+    mcts = SimpleMCTS(model, device, num_simulations, use_noise=True)
     game_history = []
     
     while not board.is_game_over() and len(game_history) < max_moves:

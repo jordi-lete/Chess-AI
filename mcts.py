@@ -93,12 +93,13 @@ class MCTSNode:
 
 
 class SimpleMCTS:
-    def __init__(self, model, device, num_simulations=200, c_puct=1.0):
+    def __init__(self, model, device, num_simulations=200, c_puct=1.0, use_noise=True):
         self.model = model
         self.device = device
         self.num_simulations = num_simulations
         self.c_puct = c_puct
-        self._root = None  # cached root for tree reuse
+        self.use_noise = use_noise
+        self._root = None
 
     def reset(self):
         """Call at the start of each new game to discard any cached tree."""
@@ -112,6 +113,7 @@ class SimpleMCTS:
             self._root = None  # opponent played something unexplored; start fresh
 
     def search(self, board):
+        self.model.eval()
         if self._root is not None and self._root.board == board:
             root = self._root
         else:
@@ -120,13 +122,12 @@ class SimpleMCTS:
 
         # Apply fresh Dirichlet noise to root at the start of each search
         # If already expanded (reused tree), update children's priors directly
-        if root.expanded and root.children:
+        if self.use_noise and root.expanded and root.children:
             legal_moves = list(root.children.keys())
             noise = np.random.dirichlet([DIRICHLET_ALPHA] * len(legal_moves))
             for i, m in enumerate(legal_moves):
                 child = root.children[m]
-                child.prior = ((1 - DIRICHLET_EPSILON) * child.prior
-                            + DIRICHLET_EPSILON * noise[i])
+                child.prior = ((1 - DIRICHLET_EPSILON) * child.prior + DIRICHLET_EPSILON * noise[i])
         # If not yet expanded, noise is handled inside expand() via add_noise=(node is root)
 
         for i in range(self.num_simulations):
@@ -137,7 +138,8 @@ class SimpleMCTS:
                 result = get_game_result(node.board)
                 value = result if node.board.turn == chess.WHITE else -result
             else:
-                value = node.expand(self.model, self.device, add_noise=(node is root))
+                add_noise = (node is root) and self.use_noise
+                value = node.expand(self.model, self.device, add_noise=add_noise)
                 if value is None:
                     continue
             node.backup(value)

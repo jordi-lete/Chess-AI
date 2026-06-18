@@ -26,7 +26,7 @@ def play_game_vs_stockfish(model, device, stockfish_path,
         "UCI_Elo": stockfish_elo
     })
     
-    mcts = SimpleMCTS(model, device, num_simulations)
+    mcts = SimpleMCTS(model, device, num_simulations, use_noise=False)
     mcts.reset()
     
     game_history = []
