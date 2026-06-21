@@ -61,7 +61,10 @@ This is a rough log of how playing strength evolved across versions, including t
 | v2-CNN | v1-CNN + value head recalibrated against Stockfish evals | 21W / 5D / 24L | ~1300 (within noise of v1) |
 | v2-CNN-mcts | v2-CNN + 500-sim MCTS | 52W / 30D / 18L | **~1400** |
 
-*[Add diagram]*
+
+<p align="center">
+    <img src="Chess-AI-results.png" width="800">
+</p>
 
 A few notable things that happened along the way:
 
