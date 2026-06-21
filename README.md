@@ -59,7 +59,7 @@ This is a rough log of how playing strength evolved across versions, including t
 | v1-S-CNN | v1 + early style fine-tune (attempted before RL) | 39W / 8D / 53L | ~1270 |
 | v1-CNN-mcts | v1-CNN + 500-sim MCTS | 18W / 10D / 22L | ~1290 (worse than raw policy) |
 | v2-CNN | v1-CNN + value head recalibrated against Stockfish evals | 21W / 5D / 24L | ~1300 (within noise of v1) |
-| v2-CNN-mcts | v2-CNN + 500-sim MCTS | 52W / 30D / 18L | **~1400** |
+| v2-CNN-mcts | v2-CNN + 500-sim MCTS | 52W / 30D / 18L | **~1440** |
 
 
 <p align="center">
