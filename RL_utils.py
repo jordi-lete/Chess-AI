@@ -429,3 +429,89 @@ def blend_policies(mcts_policy, cnn_policy, alpha=0.7):
     if total > 0:
         blended /= total
     return blended
+
+''' --- Value head tracking and calibration --- '''
+def sample_positions_by_phase(pgn_path, n_per_phase=100):
+    """Sample positions tagged by rough game phase (opening/middle/endgame)."""
+    phases = {'opening': [], 'middlegame': [], 'endgame': []}
+    with open(pgn_path, 'r', encoding='utf-8') as f:
+        while any(len(v) < n_per_phase for v in phases.values()):
+            game = chess.pgn.read_game(f)
+            if game is None:
+                break
+            moves = list(game.mainline_moves())
+            if len(moves) < 10:
+                continue
+
+            board = game.board()
+            for i, move in enumerate(moves):
+                ply = i
+                if ply < 10 and len(phases['opening']) < n_per_phase:
+                    phases['opening'].append(board.copy())
+                elif 10 <= ply < 40 and len(phases['middlegame']) < n_per_phase:
+                    if random.random() < 0.1:   # subsample, don't take every ply
+                        phases['middlegame'].append(board.copy())
+                elif ply >= 40 and len(phases['endgame']) < n_per_phase:
+                    if random.random() < 0.2:
+                        phases['endgame'].append(board.copy())
+                board.push(move)
+    return phases
+
+
+def compare_value_head_to_stockfish(model, device, phases, stockfish_path, depth=12):
+    """For each position, get model value and Stockfish eval; compare."""
+    engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+    model.eval()
+    results = {}
+
+    try:
+        for phase_name, boards in phases.items():
+            model_vals, sf_vals = [], []
+            for board in boards:
+                if board.is_game_over(claim_draw=True):
+                    continue
+
+                tensor = torch.tensor(board_to_tensor(board), dtype=torch.float32).unsqueeze(0).to(device)
+                with torch.no_grad():
+                    _, value = model(tensor)
+                model_val = float(value.item())
+
+                info = engine.analyse(board, chess.engine.Limit(depth=depth))
+                cp = info["score"].relative.score(mate_score=1000)
+                sf_val = float(np.tanh(cp / 400.0))
+
+                model_vals.append(model_val)
+                sf_vals.append(sf_val)
+
+            model_vals = np.array(model_vals)
+            sf_vals = np.array(sf_vals)
+            mse = np.mean((model_vals - sf_vals) ** 2)
+            sign_agree = np.mean((model_vals > 0) == (sf_vals > 0))
+            corr = np.corrcoef(model_vals, sf_vals)[0, 1] if len(model_vals) > 1 else float('nan')
+
+            results[phase_name] = {
+                'model_vals': model_vals, 'sf_vals': sf_vals,
+                'mse': mse, 'sign_agreement': sign_agree, 'correlation': corr
+            }
+            print(f"[{phase_name}] n={len(model_vals)}  MSE={mse:.4f}  "
+                  f"sign_agreement={sign_agree:.1%}  correlation={corr:.3f}")
+    finally:
+        engine.quit()
+
+    return results
+
+
+import matplotlib.pyplot as plt
+
+def plot_value_comparison(results):
+    fig, axes = plt.subplots(1, len(results), figsize=(5 * len(results), 5))
+    for ax, (phase_name, r) in zip(axes, results.items()):
+        ax.scatter(r['sf_vals'], r['model_vals'], alpha=0.4, s=15)
+        ax.plot([-1, 1], [-1, 1], 'r--', linewidth=1, label='perfect agreement')
+        ax.set_xlabel('Stockfish eval (tanh-scaled)')
+        ax.set_ylabel('Model value head')
+        ax.set_title(f"{phase_name}\ncorr={r['correlation']:.2f}  MSE={r['mse']:.3f}")
+        ax.legend(fontsize=8)
+        ax.set_xlim(-1.1, 1.1); ax.set_ylim(-1.1, 1.1)
+    plt.tight_layout()
+    plt.show()
