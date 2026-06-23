@@ -1,3 +1,4 @@
+import math
 import chess
 import chess.engine
 from mcts import SimpleMCTS
@@ -201,3 +202,11 @@ def play_vs_stockfish_raw(model, device, stockfish_path,
           f"score={score:.0%}")
     results['score'] = score
     return results
+
+def estimate_elo(score, opponent_elo):
+    """
+    Estimate performance rating from a fractional score against a
+    fixed-strength opponent, using the standard logistic Elo formula.
+    """
+    score = min(max(score, 1e-6), 1 - 1e-6)   # avoid log(0) at 0% or 100% scores
+    return opponent_elo - 400 * math.log10((1 / score) - 1)
