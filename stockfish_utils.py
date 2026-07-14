@@ -10,26 +10,33 @@ import numpy as np
 
 STOCKFISH_ELO = 1320
 
-def play_game_vs_stockfish(model, device, stockfish_path, 
-                            stockfish_elo=1320, num_simulations=200,
+def play_game_vs_stockfish(model, device, stockfish_path,
+                            stockfish_elo=1575, num_simulations=500,
                             rl_is_white=True, start_position=None,
-                            max_moves=200):
+                            max_moves=200, eval_depth=8):
     """
-    Play one game between the RL model (with MCTS) and Stockfish.
-    skill_level: 0-20 (0=~800, 5=~1100, 10=~1500, 15=~1900, 20=full strength)
-    Returns (game_history, result) in same format as self-play.
+    Play one game vs Stockfish. The RL model uses MCTS.
+    Each position is annotated with a real-time Stockfish evaluation
+    (tanh-scaled centipawns, current-player perspective) rather than
+    the noisy terminal game outcome — this is the key change from
+    previous runs.
+
+    eval_depth=8 gives ~50ms per position at acceptable quality.
+    Use a separate full-strength engine for evals so ELO limiting
+    doesn't corrupt the position annotations.
     """
     board = start_position.copy() if start_position else chess.Board()
-    
-    engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
-    engine.configure({
-        "UCI_LimitStrength": True,
-        "UCI_Elo": stockfish_elo
-    })
-    
+
+    # Play engine — ELO limited
+    play_engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+    play_engine.configure({"UCI_LimitStrength": True, "UCI_Elo": stockfish_elo})
+
+    # Eval engine — full strength, for clean position annotations
+    eval_engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+
     mcts = SimpleMCTS(model, device, num_simulations, use_noise=False)
     mcts.reset()
-    
+
     game_history = []
     move_count = 0
 
@@ -38,13 +45,15 @@ def play_game_vs_stockfish(model, device, stockfish_path,
             is_rl_turn = (board.turn == chess.WHITE) == rl_is_white
 
             if is_rl_turn:
-                temperature = 0.0
+                # Annotate position BEFORE the model moves — current player's perspective
+                info = eval_engine.analyse(board, chess.engine.Limit(depth=eval_depth))
+                cp = info["score"].relative.score(mate_score=1000)
+                sf_value = float(np.tanh(cp / 400.0))   # [-1, 1], current player POV
 
-                action_probs, _ = mcts.get_action_probs(board, temperature)
+                action_probs, _ = mcts.get_action_probs(board, temperature=0.0)
                 if not action_probs:
                     break
 
-                # Build policy vector and store training example
                 mcts_policy = np.zeros(4672, dtype=np.float32)
                 for move, prob in action_probs.items():
                     mcts_policy[move_to_policy_index(move)] = prob
@@ -52,20 +61,14 @@ def play_game_vs_stockfish(model, device, stockfish_path,
                 board_tensor = torch.tensor(
                     board_to_tensor(board), dtype=torch.float32
                 ).unsqueeze(0)
-                game_history.append((board_tensor, mcts_policy, board.turn))
 
-                # Select move
-                if temperature == 0.0:
-                    move = max(action_probs, key=action_probs.get)
-                else:
-                    probs = mcts_policy / mcts_policy.sum()
-                    move_idx = np.random.choice(len(probs), p=probs)
-                    move = policy_index_to_move(move_idx, board)
-                    if move not in board.legal_moves:
-                        move = random.choice(list(board.legal_moves))
+                # Third element is now a pre-computed float value, not board.turn
+                game_history.append((board_tensor, mcts_policy, sf_value))
+
+                move = max(action_probs, key=action_probs.get)
+
             else:
-                # Stockfish move — time limit keeps it responsive
-                result = engine.play(board, chess.engine.Limit(time=0.05))
+                result = play_engine.play(board, chess.engine.Limit(time=0.05))
                 move = result.move
 
             board.push(move)
@@ -73,21 +76,23 @@ def play_game_vs_stockfish(model, device, stockfish_path,
             move_count += 1
 
     finally:
-        engine.quit()
+        play_engine.quit()
+        eval_engine.quit()
 
     game_result = get_game_result(board)
     return game_history, game_result
 
-
 def generate_stockfish_games(model, device, stockfish_path,
-                              start_positions, num_games=30,
-                              stockfish_elo=None, num_simulations=100,
-                              metrics=None):
+                              start_positions, num_games=100,
+                              stockfish_elo=1575, num_simulations=500,
+                              eval_depth=8, metrics=None):
+    """
+    Generate training games vs Stockfish with per-position Stockfish evals.
+    Each game contributes (board_tensor, mcts_policy, sf_value) tuples
+    where sf_value is clean positional ground-truth, not noisy outcome.
+    """
     data = []
     wins, losses, draws = 0, 0, 0
-    
-    if stockfish_elo is None:
-        stockfish_elo = STOCKFISH_ELO
 
     for game_idx in range(num_games):
         rl_is_white = (game_idx % 2 == 0)
@@ -99,7 +104,8 @@ def generate_stockfish_games(model, device, stockfish_path,
                 stockfish_elo=stockfish_elo,
                 num_simulations=num_simulations,
                 rl_is_white=rl_is_white,
-                start_position=start
+                start_position=start,
+                eval_depth=eval_depth
             )
         except Exception as e:
             print(f"Stockfish game {game_idx+1} failed: {e}")
@@ -115,14 +121,14 @@ def generate_stockfish_games(model, device, stockfish_path,
         else:
             losses += 1
 
-        print(f"  [Stockfish game {game_idx+1}/{num_games}] "
-                 f"Stockfish ELO={stockfish_elo} | "
-                 f"RL={'White' if rl_is_white else 'Black'} | "
-                 f"result={result:+.0f} | "
-                 f"rl_moves={len(game_history)}")
+        print(f"  [SF game {game_idx+1}/{num_games}] "
+              f"ELO={stockfish_elo} | "
+              f"RL={'W' if rl_is_white else 'B'} | "
+              f"result={result:+.0f} | "
+              f"positions={len(game_history)}")
 
         if metrics is not None:
-            rl_perspective = result if rl_is_white else -result   # +1 = model wins
+            rl_perspective = result if rl_is_white else -result
             metrics.sf_results.append(rl_perspective)
             metrics.sf_game_lengths.append(len(game_history))
             if result != 0:
@@ -131,12 +137,13 @@ def generate_stockfish_games(model, device, stockfish_path,
                 metrics.sf_terminations['draw'] += 1
 
     total = wins + losses + draws
-    win_rate = (wins + 0.5 * draws) / total if total > 0 else 0.0
-    print(f"Stockfish batch — ELO={stockfish_elo} | "
-             f"W={wins} L={losses} D={draws} | "
-             f"score={wins + 0.5*draws:.1f}/{total} ({win_rate:.0%})")
+    win_rate = (wins + 0.5 * draws) / total if total else 0.0
+    print(f"SF batch — ELO={stockfish_elo} | "
+          f"W={wins} L={losses} D={draws} | "
+          f"score={wins + 0.5*draws:.1f}/{total} ({win_rate:.0%})")
 
-    stats = {'wins': wins, 'losses': losses, 'draws': draws, 'win_rate': win_rate}
+    stats = {'wins': wins, 'losses': losses, 'draws': draws,
+             'total': total, 'win_rate': win_rate}
     return data, stats
 
 def update_stockfish_elo(current_elo, win_rate,

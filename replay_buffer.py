@@ -3,15 +3,19 @@ from collections import deque
 import numpy as np
 import torch
 
+
 class ReplayBuffer:
     """
-    Stores self-play games as (game_history, result) where:
-      - game_history is a list of (board_tensor, policy_vector, turn)
-        board_tensor can be a torch.Tensor (CPU), policy_vector is np.ndarray
-      - result is a scalar (WHITE's POV): +1 white win, -1 black win, 0 draw/other
+    Stores games as (game_history, result) where:
+      game_history: list of (board_tensor, policy_vector, value)
+        - board_tensor: torch.Tensor CPU, shape [1,C,H,W]
+        - policy_vector: np.ndarray [4672]
+        - value: float, current-player perspective [-1, 1]
+          (Stockfish eval for SF games; game outcome for any self-play)
+      result: scalar game outcome from White's POV (+1/-1/0)
     """
 
-    def __init__(self, capacity=10000, rng=None):
+    def __init__(self, capacity=5000, rng=None):
         self.capacity = capacity
         self.buffer = deque(maxlen=capacity)
         self.rng = rng if rng is not None else random.Random()
@@ -23,15 +27,10 @@ class ReplayBuffer:
         self.buffer.clear()
 
     def add_games(self, games):
-        """
-        games: iterable of (game_history, result)
-          where game_history: list of (board_tensor, policy_vector, turn)
-        We store CPU-safe copies to avoid GPU memory leaks.
-        """
         for game_history, result in games:
             safe_history = []
-            for board_tensor, policy_vector, turn in game_history:
-                # board_tensor could be torch.Tensor on GPU or CPU; move to CPU
+            for board_tensor, policy_vector, value in game_history:
+                # board_tensor to CPU
                 if isinstance(board_tensor, torch.Tensor):
                     bt_cpu = board_tensor.detach().cpu()
                 else:
@@ -43,23 +42,23 @@ class ReplayBuffer:
                 else:
                     pv = np.array(policy_vector, dtype=np.float32)
 
-                safe_history.append((bt_cpu, pv, turn))
-            # store tuple (safe_history, result) - keeps same external format as self_play_data
+                # value is already a float — just ensure correct type
+                v = float(value)
+
+                safe_history.append((bt_cpu, pv, v))
+
             self.buffer.append((safe_history, float(result)))
 
     def sample_examples(self, n_examples):
         """
-        Sample n_examples uniformly across positions inside games.
-        Returns list of (board_tensor, policy_vector, value) where:
-          - board_tensor is a torch.Tensor (CPU) (shape [1,C,H,W])
-          - policy_vector is np.ndarray (4672,)
-          - value is float from perspective of player to move in that stored position (+1 = player to move winning)
+        Sample n_examples uniformly across positions.
+        Returns list of (board_tensor, policy_vector, value) where
+        value is already in current-player perspective — no conversion needed.
         """
         if len(self.buffer) == 0:
             return []
 
-        # Weight game selection by length so each position is equally likely
-        game_lengths = [len(game_history) for game_history, _ in self.buffer]
+        game_lengths = [len(gh) for gh, _ in self.buffer]
         total_positions = sum(game_lengths)
         if total_positions == 0:
             return []
@@ -67,24 +66,19 @@ class ReplayBuffer:
 
         examples = []
         for _ in range(n_examples):
-            # Sample game proportional to its length
             game_idx = self.rng.choices(range(len(self.buffer)), weights=weights)[0]
             game_history, result = self.buffer[game_idx]
-            if len(game_history) == 0:
+            if not game_history:
                 continue
             pos_idx = self.rng.randrange(len(game_history))
-            board_tensor, policy_vector, turn = game_history[pos_idx]
-
-            value = result if turn else -result
+            board_tensor, policy_vector, value = game_history[pos_idx]
             examples.append((board_tensor, policy_vector, value))
 
         return examples
 
     def get_all_examples(self):
-        """Flatten all stored games as examples (may be big)."""
         ex = []
         for game_history, result in self.buffer:
-            for board_tensor, policy_vector, turn in game_history:
-                value = result if turn else -result
+            for board_tensor, policy_vector, value in game_history:
                 ex.append((board_tensor, policy_vector, value))
         return ex
